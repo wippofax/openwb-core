@@ -23,9 +23,9 @@ responses were used. Network connections were blocked in the tests.
 
 | Check | Result |
 | --- | --- |
-| Module suite including retry/error cases against target Core source | 76 passed |
+| Module suite including retry, diagnostics and PHP helper cases against target Core source | 121 passed |
 | Additional target-interface checks | 11 passed |
-| Settings component and integration tests | 3 passed on development and pinned target source |
+| Settings component and integration tests | 12 passed on development and pinned target source |
 | Local settings UI build | Passed, including the pinned 2.2.3 candidate |
 | Built UI loader, component chunk and configuration fields | Verified |
 
@@ -93,7 +93,7 @@ from three existing debug calls along the edit/save path. All 21 existing vehicl
 modules remain, with NissanConnect added; the candidate contains 355 build files.
 The current development UI's unrelated changes are not included.
 
-Three synthetic tests use the real text input, asynchronous vehicle proxy, Vuex
+The original three synthetic tests use the real text input, asynchronous vehicle proxy, Vuex
 store and existing application save method. They cover module selection from a
 synthetic Core descriptor, required username/password, masked input, optional VIN,
 unchanged defaults and the expected configuration publication. Publication is
@@ -107,6 +107,18 @@ and validation limits. Raw JSON configuration is not the planned credential-entr
 workflow. The existing fallback for other missing modules and normal credential
 storage in openWB settings/backups are unchanged. A complete UI/security audit is
 outside this check.
+
+## Query diagnostics and settings test extension
+
+The current candidate additionally includes a module-owned PHP test endpoint,
+stdin-only Python worker, DEBUG query diagnostics and the settings test button.
+The exact-target suite now passes 121 module/PHP checks and the same 11 native
+interface checks. PHP 7.4.33 helper tests cover origin/input checks, subprocess
+I/O limits, stderr exclusion and account-scoped cooldown storage. Twelve UI tests pass
+on both sources, and the pinned build succeeds with the existing warnings.
+The browser preview shows synthetic battery values and separate timestamps.
+Full HTTP integration and execution on target Linux/ARM remain unverified.
+See [the detailed behavior and limits](diagnostics.md).
 
 ## Remaining validation
 

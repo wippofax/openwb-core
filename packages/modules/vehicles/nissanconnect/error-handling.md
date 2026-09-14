@@ -104,6 +104,15 @@ No new policy, error-counter manipulation, VW cache code or persistent account
 data was added. Existing Nissan retry pauses protect the backend only; deferred
 updates can still contribute to the standard error counter when fallback fails.
 
+## Diagnostics
+
+The module now logs a selected DEBUG summary of actual attempts, deferred calls,
+last success, Nissan measurement times, battery values and retry delays. The
+settings connection test returns a separate passive result without publishing
+it into charging control. Neither changes the shared fallback or zero policy.
+See [query diagnostics and the test endpoint](diagnostics.md) for confidentiality,
+separate cooldowns and exact timestamp meanings.
+
 ## Verification limits
 
 Synthetic module tests cover timeouts, malformed or invalid responses, HTTP

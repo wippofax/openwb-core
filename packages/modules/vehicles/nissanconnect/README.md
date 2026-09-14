@@ -87,9 +87,26 @@ See [error behavior and the Volkswagen comparison](error-handling.md) for the
 shared energy fallback and the unresolved charging policy when it is unavailable.
 These request pauses do not pause charging or override openWB's error counter.
 
+## Query diagnostics and connection test
+
+Regular module updates now log a selected DEBUG summary: actual HTTP attempt
+times, success/failure/deferment, Nissan measurement time, data age, SoC, optional
+range and retry delay. Credentials, VINs, tokens, URLs and raw responses are
+excluded. Real battery values and times remain confidential.
+
+The matching settings page includes **Test connection**. It displays a passive
+query's battery values and separate query/measurement times using the current
+form values, without saving settings or updating charging control. It requires
+the module-owned PHP endpoint as well as the Python module and matching UI build.
+See [diagnostics and connection-test behavior](diagnostics.md) for log fields,
+the private cooldown metadata, access assumptions and testing limits.
+
 ## Offline validation
 
-Use synthetic fixtures only. The tests block socket connections, name resolution
+Use synthetic fixtures only. Optional PHP helper tests need `php` on PATH or
+`NISSAN_TEST_PHP` pointing to a PHP CLI executable; otherwise those tests are
+explicitly skipped. Their subprocesses use fixed synthetic programs only.
+The Python tests block socket connections, name resolution
 and real vehicle queries through the replaced transport. The adapter test
 replaces the service wrapper and verifies the values passed to the real
 `CarState`; it does not test a running charging system.

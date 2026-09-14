@@ -5,7 +5,7 @@ Credentials, cookies and tokens stay in memory. Never log transport payloads.
 """
 import base64
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 import hashlib
 from html.parser import HTMLParser
@@ -203,10 +203,19 @@ class NissanClient:
         self._user_id = None
         self._vin = None
         self._retry_at = 0
+        self._provider_retry_at = 0
         self._failed_queries = 0
         self._retry_error_type = NissanError
         self._retry_reason = ""
         self._deadline = None
+        self.last_query = None
+        self._last_contact_at = None
+        self._last_success_at = None
+        self._last_measurement_at = None
+        self._request_started_at = None
+        self._request_count = 0
+        self._http_status = None
+        self._phase = "idle"
 
     def _request(self, method, url, auth_request=False, **kwargs):
         if _origin(url) not in {_origin(AUTH), _origin(BFF), _origin(USERS), _origin(CARS)}:
@@ -214,9 +223,18 @@ class NissanClient:
         remaining = self._deadline - self._clock()
         if remaining <= 0:
             raise NissanError("Nissan query time limit exceeded.")
+        self._last_contact_at = self._wall_clock()
+        if self._request_started_at is None:
+            self._request_started_at = self._last_contact_at
+        self._request_count += 1
+        self._http_status = None
         response = self._transport.request(method, url, timeout=min(10, remaining), **kwargs)
+        self._http_status = response.status
         if response.status in (429, 503):
             self._retry_at = self._clock() + self._retry_after(response)
+            # Separate provider advice from the scheduled client's own error backoff.
+            provider_delay = self._retry_after(response, minimum=0, default=300 if response.status == 429 else 0)
+            self._provider_retry_at = self._clock() + provider_delay
         if response.status == 429:
             raise RateLimitError("Nissan is rate limiting requests. Please try again later.")
         if response.status in (401, 403) or (auth_request and response.status == 400):
@@ -225,7 +243,7 @@ class NissanClient:
             raise NissanError("Nissan service returned an HTTP error ({}).".format(response.status))
         return response
 
-    def _retry_after(self, response):
+    def _retry_after(self, response, minimum=300, default=300):
         """Accept delay seconds or an HTTP date; bound server-directed pauses."""
         value = next((v for k, v in response.headers.items() if k.lower() == "retry-after"), None)
         try:
@@ -237,8 +255,8 @@ class NissanClient:
                     raise ValueError
                 delay = deadline.timestamp() - self._wall_clock()
             except (ValueError, TypeError, AttributeError, OverflowError):
-                delay = 300
-        return max(300, min(delay, 86400))
+                delay = default
+        return max(minimum, min(delay, 86400))
 
     def _json(self, method, url, **kwargs):
         response = self._request(method, url, **kwargs)
@@ -371,22 +389,65 @@ class NissanClient:
         else:
             raise NissanError("Could not select a unique vehicle. Please configure the VIN.")
 
+    def _finish_query(self, outcome, started, result=None):
+        """Keep an allowlisted diagnostic summary, never raw transport data."""
+        completed = self._wall_clock()
+        if result is not None:
+            self._last_success_at = completed
+            self._last_measurement_at = result.timestamp
+
+        def iso(value):
+            return None if value is None else datetime.fromtimestamp(value, timezone.utc).isoformat()
+
+        self.last_query = {
+            "outcome": outcome,
+            "phase": self._phase,
+            "request_started_at": iso(self._request_started_at),
+            "completed_at": iso(completed),
+            "duration_seconds": round(max(0, self._clock() - started), 3),
+            "http_requests": self._request_count,
+            "last_http_status": self._http_status,
+            "last_contact_at": iso(self._last_contact_at),
+            "last_success_at": iso(self._last_success_at),
+            "last_measurement_at": iso(self._last_measurement_at),
+            "measurement_at": iso(result.timestamp) if result else None,
+            "data_age_seconds": round(completed - result.timestamp, 1) if result else None,
+            "soc": result.soc if result else None,
+            "range_km": result.range_km if result else None,
+            "retry_after_seconds": max(0, math.ceil(self._retry_at - self._clock())),
+            "provider_retry_after_seconds": max(0, math.ceil(self._provider_retry_at - self._clock())),
+            "source": "nissan_cached_api",
+        }
+
     def fetch_battery(self):
-        if self._clock() < self._retry_at:
-            remaining = math.ceil(self._retry_at - self._clock())
+        started = self._clock()
+        self._request_started_at = None
+        self._request_count = 0
+        self._http_status = None
+        self._phase = "idle"
+        if started < self._retry_at:
+            remaining = math.ceil(self._retry_at - started)
+            self._finish_query("deferred", started)
             raise self._retry_error_type(
                 "Nissan requests are paused for {} more seconds. {}".format(remaining, self._retry_reason))
-        self._deadline = self._clock() + 60
+        self._deadline = started + 60
+        result = None
+        outcome = "failed"
         try:
+            self._phase = "authentication"
             self._authenticate()
             if not self._vin:
+                self._phase = "vehicle_selection"
                 self._select_vehicle()
+            self._phase = "battery"
             body = self._get(CARS + "v1/cars/" + self._vin + "/battery-status")
             result = parse_battery(body, now=self._wall_clock())
             self._failed_queries = 0
             self._retry_at = 0
+            self._provider_retry_at = 0
             self._retry_error_type = NissanError
             self._retry_reason = ""
+            outcome = "success"
             return result
         except NissanError as error:
             if isinstance(error, AuthenticationError):
@@ -402,3 +463,4 @@ class NissanClient:
             raise
         finally:
             self._deadline = None
+            self._finish_query(outcome, started, result)

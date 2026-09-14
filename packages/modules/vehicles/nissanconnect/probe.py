@@ -13,6 +13,8 @@ import warnings
 if __package__:
     from .api import NissanClient, NissanError
 else:
+    # Isolated/embedded Python omits the script directory from its search path.
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from api import NissanClient, NissanError
 
 

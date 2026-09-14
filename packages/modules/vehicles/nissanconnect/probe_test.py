@@ -1,3 +1,6 @@
+import os
+from pathlib import Path
+import subprocess
 from unittest.mock import Mock
 
 import pytest
@@ -60,3 +63,22 @@ def test_probe_aborts_if_hidden_input_is_unavailable(monkeypatch, local_terminal
     monkeypatch.setattr(probe, "NissanClient", factory)
     assert probe.main() == 2
     factory.assert_not_called()
+
+
+def test_direct_probe_start_with_isolated_python_loads_adjacent_api(tmp_path):
+    # Reproduce embedded Python's missing script-directory search path without
+    # importing a real client or allowing a live request in the child process.
+    script = tmp_path / "probe.py"
+    script.write_text(Path(probe.__file__).read_text(encoding="utf-8"), encoding="utf-8")
+    (tmp_path / "api.py").write_text(
+        'class NissanError(Exception): pass\n'
+        'class NissanClient:\n'
+        '    def __init__(self, *args, **kwargs):\n'
+        '        raise AssertionError("No real client in the startup test")\n',
+        encoding="utf-8")
+    result = subprocess.run(
+        [probe.sys.executable, "-I", str(script)], cwd=str(tmp_path),
+        env=dict(os.environ, CODEX_CI="1"), capture_output=True, text=True, timeout=10)
+    assert result.returncode == 2, result.stderr
+    assert "Aborted: Please run in a private terminal outside a Codex or agent session." in result.stdout
+    assert result.stderr == ""

@@ -27,7 +27,9 @@ query intervals, errors and charge limits.
   A missing optional range does not invalidate an otherwise valid SoC.
 
 See [the exact-version compatibility report](COMPATIBILITY.md) for the local
-openWB 2.2.3 checks, UI requirements and existing error-handling behavior.
+openWB 2.2.3 checks, UI requirements and existing error-handling behavior. The UI
+repository now includes `docs/nissanconnect-2.2.3.md` and
+`scripts/prepare-nissanconnect-2.2.3.py` for the locally verified target build.
 
 ## Configuration
 

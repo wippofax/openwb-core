@@ -10,8 +10,9 @@ branch or release label, defines this check.
 The NissanConnect Python module passed the local compatibility checks without
 implementation changes. This establishes compatibility with the exercised
 Python interfaces, not a complete wallbox installation or charging-system test.
-The target's bundled settings UI does not yet contain the NissanConnect page.
-A coordinated, release-compatible UI build is needed before device testing.
+The target's original settings UI has no NissanConnect page. A matching local
+UI candidate has now been prepared from the public 2.2.3 source, with synthetic
+selection, credential-entry and save-path checks. It has not been installed.
 
 ## Validation scope
 
@@ -24,8 +25,8 @@ responses were used. Network connections were blocked in the tests.
 | --- | --- |
 | Existing module suite against target Core source | 60 passed |
 | Additional target-interface checks | 11 passed |
-| Settings component test | 1 passed |
-| Local production settings UI build | Passed |
+| Settings component and integration tests | 3 passed on development and pinned target source |
+| Local settings UI build | Passed, including the pinned 2.2.3 candidate |
 | Built UI loader, component chunk and configuration fields | Verified |
 
 The additional checks exercised the real target `ConfigurableVehicle`,
@@ -40,8 +41,8 @@ scheduler's unmodified `_get_threads` method with synthetic dependencies and
 without starting workers. The additional harness and results are local test
 evidence; they are not part of the regular module suite.
 
-The checked module revision was `555fe6e`; the settings source revision was
-`d0d5f23`. The UI build included `./nissanconnect/vehicle.vue` in the dynamic module
+The initial check used module revision `555fe6e` and settings revision
+`d0d5f23`. That development UI build included `./nissanconnect/vehicle.vue` in the dynamic module
 map, generated its component chunk, and retained the masked password input and
 the `user_id`, `password` and `vin` configuration fields.
 
@@ -74,18 +75,39 @@ entry. Its existing fallback offers raw JSON editing and displays
 credentials without masking. Adding only the Python module would therefore not
 provide the intended credential-entry page.
 
-The current settings source builds successfully with the new page. This does
-not establish that replacing the entire target UI with a newer development UI
-is compatible with all other features of Core 2.2.3. Before installation,
-prepare a settings build aligned with the target release and verify module
-selection, credential masking and configuration delivery together. Raw JSON
-configuration is not the planned credential-entry workflow.
+A local candidate now uses the maintainer's public 2.2.3 UI source
+[`e8de268fa25f7efca2b5ffc005a757a2f36b530f`](https://github.com/Brett-S-OWB/openwb-ui-settings_BS_folk/commit/e8de268fa25f7efca2b5ffc005a757a2f36b530f),
+its exact dependency lockfile and the released build mode (`development`). An
+unmodified local rebuild matched all 354 released files after normalizing asset
+hashes, embedded source-root paths and scope-bound JavaScript identifiers in
+parsed syntax trees. The 402 Vue source paths also matched. This establishes a
+structurally matching base, not byte-for-byte reproduction or a full runtime test.
+
+The candidate adds only the Nissan component and its tests, plus removes values
+from three existing debug calls along the edit/save path. All 21 existing vehicle
+modules remain, with NissanConnect added; the candidate contains 355 build files.
+The current development UI's unrelated changes are not included.
+
+Three synthetic tests use the real text input, asynchronous vehicle proxy, Vuex
+store and existing application save method. They cover module selection from a
+synthetic Core descriptor, required username/password, masked input, optional VIN,
+unchanged defaults and the expected configuration publication. Publication is
+captured in memory; the application root and MQTT client are not started. The
+checked debug calls do not contain the account values. A separate visible preview
+uses the target proxy with disabled synthetic fields and blocked connections.
+
+The UI repository contains `scripts/prepare-nissanconnect-2.2.3.py` and
+`docs/nissanconnect-2.2.3.md` for repeatable source preparation, hashes, build steps
+and validation limits. Raw JSON configuration is not the planned credential-entry
+workflow. The existing fallback for other missing modules and normal credential
+storage in openWB settings/backups are unchanged. A complete UI/security audit is
+outside this check.
 
 ## Remaining validation
 
 - Linux/ARM execution and a complete openWB runtime with real MQTT storage.
 - Sustained authentication and token renewal with a real account.
-- A release-compatible settings UI combined with the target Core.
+- The prepared settings UI together with the real target Core, MQTT and storage.
 - Controlled charging tests covering stale data, API outages, error-counter
   behavior and configured SoC limits.
 - An explicit installation, backup and recovery plan approved before any

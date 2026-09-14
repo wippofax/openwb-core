@@ -1,84 +1,81 @@
 # Nissan Leaf ZE1 / MyNISSAN EU (experimental)
 
-Dieses Modul liest die bei Nissan gespeicherten Batteriedaten über MyNISSAN
-OneID und Kamereon. Es liefert SoC, Reichweite (falls vorhanden) und den
-tatsächlichen Messzeitpunkt an openWB. Anzeige, Abfrageintervalle,
-Fehlerbehandlung und Ladegrenzen übernimmt die vorhandene openWB-Regelung.
+This module reads battery data stored by Nissan through MyNISSAN OneID and
+Kamereon. It provides openWB with the SoC, range (if available) and actual
+measurement timestamp. The existing openWB control system handles display,
+query intervals, errors and charge limits.
 
-## Voraussetzungen und Grenzen
+## Requirements and limitations
 
-- Europäisches MyNISSAN-Konto mit funktionierender Anmeldung und zugeordnetem
-  Leaf ZE1. Die App-/Dienstzuordnung ist entscheidend, nicht allein das Baujahr.
-- NissanConnect EV und das vorhandene Modul `leaf` verwenden eine andere API.
-  Dieses Modul verändert das bisherige Leaf-Modul nicht.
-- Inoffizielle, aus öffentlichen Implementierungen abgeleitete Schnittstelle.
-  Nissan kann Anmeldung oder Datenformate ändern. Zusätzliche Anmeldeschritte,
-  Einwilligungen oder MFA werden nicht automatisiert; gegebenenfalls in der
-  offiziellen App erledigen.
-- **Noch kein erfolgreicher Test mit einem echten Nissan-Konto oder einer
-  Wallbox.** Ein erfolgreicher synthetischer Login-Test belegt keine aktuelle
-  Herstellerkompatibilität.
-- Es wird ausschließlich der Serverbestand gelesen. Kein Aufwecken, kein
-  `refresh-battery-status`, kein Starten oder Stoppen des Fahrzeugladens.
-  Bei alten Herstellerdaten kann auch der gelieferte SoC alt sein. Der originale
-  Zeitstempel bleibt erhalten; openWB kann seine vorhandene Berechnung verwenden.
-- Fehlender/ungültiger SoC oder ein fehlender, zeitzonenloser beziehungsweise
-  mehr als fünf Minuten zukünftiger Messzeitpunkt erzeugen einen Fehler.
-  Fehlende optionale Reichweite verhindert keinen gültigen SoC.
+- A European MyNISSAN account with a working login and an associated Leaf ZE1.
+  The app and service used by the vehicle matter, not just its model year.
+- NissanConnect EV and the existing `leaf` module use a different API.
+  This module does not modify the existing Leaf module.
+- This is an unofficial interface derived from public implementations. Nissan
+  may change the login flow or data formats. Additional login steps, consent
+  and MFA are not automated; complete them in the official app if required.
+- **No successful test with a real Nissan account or wallbox yet.** A successful
+  synthetic login test does not establish compatibility with the current
+  manufacturer service.
+- Only cached server data is read. No wakeup, `refresh-battery-status` or vehicle
+  charging start/stop commands are sent. If Nissan's data is old, the reported
+  SoC may also be old. The original timestamp is preserved so openWB can use
+  its existing calculation.
+- A missing or invalid SoC, or a measurement timestamp that is missing, has no
+  time zone or is more than five minutes in the future, produces an error.
+  A missing optional range does not invalidate an otherwise valid SoC.
 
-## Konfiguration
+## Configuration
 
-Das Modul hat den Typ `nissanconnect`. Die passende Einstellungsseite liegt im
-Repository `openWB/openwb-ui-settings` unter
+The module type is `nissanconnect`. The corresponding settings page is in the
+`openWB/openwb-ui-settings` repository at
 `src/components/vehicles/nissanconnect/vehicle.vue`.
 
-| Feld | Bedeutung |
+| Field | Meaning |
 | --- | --- |
-| `user_id` | E-Mail-Adresse des MyNISSAN-Kontos |
-| `password` | Passwort des MyNISSAN-Kontos |
-| `vin` | Optionale FIN; bei mehreren Fahrzeugen im Konto erforderlich |
+| `user_id` | MyNISSAN account email address |
+| `password` | MyNISSAN account password |
+| `vin` | Optional VIN; required if the account contains multiple vehicles |
 
-Die Region ist auf Europa festgelegt. Ein einziges Fahrzeug wird automatisch
-gewählt; eine mehrdeutige Auswahl oder eine unbekannte FIN erzeugt einen Fehler.
+The region is fixed to Europe. A single vehicle is selected automatically.
+Ambiguous selection or an unknown VIN produces an error.
 
-## Datenfluss und Geheimnisse
+## Data flow and secrets
 
-Das Modul kommuniziert bei einer späteren Ausführung direkt mit den festgelegten
-Nissan-/Kamereon-HTTPS-Endpunkten. Ein Modellanbieter ist am Clientbetrieb nicht
-beteiligt. Dieser Quellcode erzeugt keine Telemetrie und speichert keine
-API-Antworten, Cookies oder Tokens auf Datenträgern. Tokens werden im
-Clientobjekt wiederverwendet; nach Neustart oder Konfigurationsänderung erfolgt
-eine neue Anmeldung.
+When run, the module communicates directly with the configured Nissan and
+Kamereon HTTPS endpoints. No model provider is involved in client operation.
+This code produces no telemetry and does not store API responses, cookies or
+tokens on disk. Tokens are reused within the client object; restarting or
+changing the configuration triggers a new login.
 
-Die allgemeinen openWB-Einstellungen und Sicherungen können konfigurierte
-Zugangsdaten enthalten. Passwortmaskierung im Browser schützt diese Speicherung
-nicht. Solche Konfigurationen, Sicherungen, FINs und echte API-Antworten dürfen
-nicht in Git, Issues, Chatnachrichten oder Modell-Werkzeugausgaben gelangen.
-`.gitignore` allein verhindert keinen Transfer an ein Cloud-Modell.
+General openWB settings and backups may contain configured credentials.
+Masking the password in the browser does not protect that storage. Such
+configurations, backups, VINs and real API responses must not be included in
+Git, issues, chat messages or model tool outputs. `.gitignore` alone does not
+prevent transfer to a cloud model.
 
-Der Transport verwendet deshalb die Python-Standardbibliothek mit
-Zertifikatsprüfung, begrenzter Antwortgröße und expliziter Kontrolle von
-Weiterleitungen. Der übliche `modules.common.req.get_http_session()`-Hook wird
-hier bewusst nicht verwendet, weil er vollständige Antworten protokolliert.
-Die Standardbibliothek vermeidet außerdem urllib3-Debug-URLs mit FIN oder
-Autorisierungscode. Ausnahmen enthalten nur feste, unpersönliche Meldungen;
-Originalantworten und ursprüngliche Transportausnahmen werden nicht ausgegeben.
+The transport therefore uses the Python standard library with certificate
+verification, a response size limit and explicit redirect handling. It avoids
+the usual `modules.common.req.get_http_session()` hook because that hook logs
+complete responses. The standard library also avoids urllib3 debug URLs that
+contain VINs or authorization codes. Exceptions contain only fixed messages
+without personal data; original responses and underlying transport exceptions
+are not displayed.
 
-Eine Anfrage wartet höchstens zehn Sekunden auf Socket-Operationen. Nach einem
-Budget von 60 Sekunden werden keine weiteren Requests gestartet. Das ist kein
-harter Gesamtzeitabbruch eines bereits laufenden Socket-Reads. Weiterleitungen
-und die Wiederholung nach abgelehnter Authentifizierung sind begrenzt. HTTP 429
-führt zu einer Pause von mindestens fünf Minuten; fehlgeschlagene Anmeldung
-ebenso. Es gibt keine unbeschränkten Wiederholungsschleifen oder Warte-Sleeps.
+Each request uses a socket timeout of at most ten seconds. No further requests
+are started after a 60-second budget. This is not a hard overall deadline for
+a socket read already in progress. Redirects and retries after rejected
+authentication are bounded. HTTP 429 triggers a cooldown of at least five
+minutes, as does a failed login. There are no unbounded retry loops or sleeps.
 
-## Offline prüfen
+## Offline validation
 
-Nur synthetische Fixtures verwenden. Die Tests sperren Socket-Verbindungen,
-Namensauflösung und das Starten einer echten Fahrzeugabfrage über den
-ersetzten Transport. Der Adaptertest ersetzt den Dienst-Wrapper; er prüft die
-Übergabe an den echten `CarState`, keine laufende Ladeanlage.
+Use synthetic fixtures only. The tests block socket connections, name resolution
+and real vehicle queries through the replaced transport. The adapter test
+replaces the service wrapper and verifies the values passed to the real
+`CarState`; it does not test a running charging system.
 
-Vom Core-Repositoryroot mit einer Python-3.9-Testumgebung:
+From the Core repository root, using a Python 3.9 test environment:
 
 ```sh
 PYTHONPATH=packages python -m pytest -q packages/modules/vehicles/nissanconnect \
@@ -86,7 +83,7 @@ PYTHONPATH=packages python -m pytest -q packages/modules/vehicles/nissanconnect 
 python -m flake8 packages/modules/vehicles/nissanconnect
 ```
 
-Für die UI im separaten Repository:
+For the UI in its separate repository:
 
 ```sh
 npm ci --ignore-scripts
@@ -95,57 +92,57 @@ npx vitest run src/components/vehicles/nissanconnect/vehicle.spec.js
 npm run build
 ```
 
-Der normale Build erzeugt lokale UI-Dateien. Die Skripte `build-dev` und
-`build-prod` schreiben dagegen in einen openWB-Installationspfad und gehören
-nicht zum hier beschriebenen Offline-Test.
+The normal build generates local UI files. The `build-dev` and `build-prod`
+scripts write to an openWB installation path and are outside the scope of this
+offline test procedure.
 
-## Späterer Test an einer eigenen Wallbox
+## Later testing on your own wallbox
 
-1. Zunächst einen abgeschirmten Test auf einem separaten Rechner vorbereiten.
-   Zugangsdaten lokal verdeckt eingeben, außerhalb eines Cloud-Agenten ausführen
-   und Ergebnisse lokal mit der App vergleichen. Keine echten Werte in den
-   Agenten-Kontext übernehmen. Ein solcher Live-Test ist hier noch nicht erfolgt.
-2. Für die Installation zuerst einen konkreten Plan für Softwarestand,
-   Sicherung, betroffene Dateien, Testfenster und Wiederherstellung erstellen.
-3. **Vor jeder Wallbox-Änderung ausdrücklich mit Warnung vor Auswirkungen und
-   Risiken nachfragen und eine ausdrückliche Genehmigung abwarten.** Das betrifft
-   auch Sicherungsdateien auf dem Gerät, Dateiübertragung, Neustarts,
-   Konfiguration sowie MQTT-SoC- oder Steuerwerte von einem anderen Rechner.
-4. Nach genehmigter Installation zuerst SoC und Messzeitpunkt vergleichen,
-   danach die vorhandene Laderegelung mit separat genehmigten Einstellungen
-   beobachten. Ein Rollback ist ebenfalls eine Geräteänderung und muss im
-   genehmigten Plan enthalten sein.
+1. First prepare an isolated test on a separate computer. Enter credentials
+   locally using hidden input, run outside a cloud agent and compare results
+   with the app locally. Do not transfer real values into the agent context.
+   No such live test has been performed yet.
+2. Before installation, prepare a concrete plan covering the software version,
+   backup, affected files, test window and recovery.
+3. **Before every wallbox change, explicitly ask for permission with a warning
+   about its effects and risks, and wait for explicit approval.** This also
+   applies to backup files on the device, file transfers, restarts,
+   configuration changes, and MQTT SoC or control values sent from another
+   computer.
+4. After an approved installation, first compare SoC and measurement timestamps,
+   then observe the existing charging control with separately approved settings.
+   A rollback is also a device change and must be covered by the approved plan.
 
-Für Schritt 1 enthält das Modul `probe.py`, das ausschließlich manuell in einem
-privaten lokalen Terminal außerhalb von Codex/Cloud-Agenten gestartet wird:
+For step 1, the module includes `probe.py`, which must be started manually in
+a private local terminal outside Codex or cloud agents:
 
 ```sh
 python packages/modules/vehicles/nissanconnect/probe.py
 ```
 
-Der Starter fordert eine Bestätigung vor dem Abruf, liest E-Mail, Passwort und
-optionale FIN verdeckt und zeigt SoC/Messzeitpunkt nur im Terminal. Er verweigert
-Pipes, Ausgabeumleitung und einige erkennbare Agentenumgebungen. Das ist keine
-vollständige technische DLP-Grenze: Terminalaufzeichnung, Bildschirmfreigabe,
-andere Agenten und Betriebssystemüberwachung lassen sich damit nicht ausschließen.
-Kein Live-Test darf über Modell-Werkzeuge gestartet werden. Die reinen
-Offline-Tests von `probe.py` verwenden einen ersetzten Client.
+The probe asks for confirmation before the query, reads email, password and
+optional VIN using hidden input, and displays SoC and measurement time only in
+the terminal. It rejects pipes, output redirection and some detectable agent
+environments. This is not a complete technical data loss prevention boundary:
+terminal recording, screen sharing, other agents and operating system monitoring
+cannot be ruled out. Never start a live test through model tools. The offline
+tests of `probe.py` use a replaced client.
 
-Kein Installations-, SSH-, MQTT- oder Neustartskript ist Bestandteil des Moduls.
+The module contains no installation, SSH, MQTT or restart scripts.
 
-## Zum Projekt beitragen
+## Contributing
 
-Core-Änderungen als eigenen Beitrag gegen `openWB/core:master` vorbereiten;
-die Einstellungsseite als separaten Beitrag gegen
-`openWB/openwb-ui-settings:main`. Die beiden Beiträge gegenseitig referenzieren,
-Testgrenzen und API-Referenz nennen und keine gebauten UI-Dateien in den Core-PR
-aufnehmen. Veröffentlichung und Remote-Merge benötigen eine eigene Beauftragung.
+Prepare Core changes as a contribution against `openWB/core:master` and the
+settings page as a separate contribution against `openWB/openwb-ui-settings:main`.
+Cross-reference both contributions, state the testing limitations and API
+reference, and do not include built UI files in the Core PR. Publication and
+remote merges require separate authorization.
 
-Referenzen:
+References:
 
-- [openWB: neues Modul](https://github.com/openWB/core/blob/master/docs/Neues%20Modul%20programmieren.md)
-- [openWB: Einstellungsseite](https://github.com/openWB/core/blob/master/docs/Einstellungs-Seite%20erstellen.md)
-- [NissanConnect-Referenz, festgehaltener Stand](https://github.com/dan-r/HomeAssistant-NissanConnect/tree/b0bafe9108d4574e243aa182324584dbc68369ad)
-- [OneID-Umstellung](https://github.com/dan-r/HomeAssistant-NissanConnect/pull/119)
+- [openWB: developing a new module](https://github.com/openWB/core/blob/master/docs/Neues%20Modul%20programmieren.md)
+- [openWB: creating a settings page](https://github.com/openWB/core/blob/master/docs/Einstellungs-Seite%20erstellen.md)
+- [NissanConnect reference at the recorded revision](https://github.com/dan-r/HomeAssistant-NissanConnect/tree/b0bafe9108d4574e243aa182324584dbc68369ad)
+- [OneID migration](https://github.com/dan-r/HomeAssistant-NissanConnect/pull/119)
 
-Lizenzhinweise zur verwendeten Referenz stehen in `NOTICE.md`.
+See `NOTICE.md` for license information for the reference implementation.

@@ -278,7 +278,7 @@ def test_transport_limits_response_size(monkeypatch):
         raise HTTPError(AUTH, 500, "error", {}, io.BytesIO(b"x" * (MAX_RESPONSE + 1)))
 
     monkeypatch.setattr(transport._opener, "open", respond)
-    with pytest.raises(NissanError, match="groß"):
+    with pytest.raises(NissanError, match="too large"):
         transport.request("GET", AUTH)
 
 
@@ -290,6 +290,6 @@ def test_total_request_budget_stops_redirect_chain():
         return reply("", 302, {"Location": "/next"})
 
     transport.responses.append(slow_response)
-    with pytest.raises(NissanError, match="Zeitlimit"):
+    with pytest.raises(NissanError, match="time limit"):
         client.fetch_battery()
     assert len(transport.calls) == 1

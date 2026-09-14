@@ -39,7 +39,7 @@ def test_probe_aborts_before_requesting_credentials(monkeypatch, local_terminal)
 
 def test_probe_uses_hidden_inputs_without_echo(monkeypatch, local_terminal, capsys):
     monkeypatch.setattr(probe.sys.stdout, "isatty", lambda: True)
-    monkeypatch.setattr("builtins.input", lambda prompt: "j")
+    monkeypatch.setattr("builtins.input", lambda prompt: "y")
     monkeypatch.setattr(probe, "getpass", Mock(side_effect=["synthetic@example.invalid", "synthetic-password", ""]))
     client = Mock()
     client.fetch_battery.return_value = BatteryStatus(47, 1640995200, 123)
@@ -54,7 +54,7 @@ def test_probe_uses_hidden_inputs_without_echo(monkeypatch, local_terminal, caps
 
 
 def test_probe_aborts_if_hidden_input_is_unavailable(monkeypatch, local_terminal):
-    monkeypatch.setattr("builtins.input", lambda prompt: "j")
+    monkeypatch.setattr("builtins.input", lambda prompt: "y")
     monkeypatch.setattr(probe, "getpass", Mock(side_effect=probe.GetPassWarning("synthetic")))
     factory = Mock()
     monkeypatch.setattr(probe, "NissanClient", factory)

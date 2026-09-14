@@ -18,46 +18,46 @@ else:
 
 def main():
     if any(os.environ.get(name) for name in ("CODEX_THREAD_ID", "CODEX_SANDBOX", "CODEX_CI")):
-        print("Abbruch: Bitte außerhalb einer Codex-/Agenten-Sitzung in einem privaten Terminal starten.")
+        print("Aborted: Please run in a private terminal outside a Codex or agent session.")
         return 2
     if not sys.stdin.isatty() or not sys.stdout.isatty():
-        print("Abbruch: Ein interaktives lokales Terminal ist erforderlich; keine Umleitung oder Pipe.")
+        print("Aborted: An interactive local terminal is required; no redirection or pipes.")
         return 2
-    print("Lokaler MyNISSAN-Test: Dieser Aufruf sendet Anmeldedaten direkt an Nissan.")
-    print("Keine Wallbox-Verbindung. Keine Dateiablage. Das Ergebnis bleibt vertraulich.")
-    print("Nur außerhalb von Cloud-Agenten, Terminalaufzeichnung und Bildschirmfreigabe verwenden.")
-    print("Die Umgebungsprüfung ist eine Vorsichtsmaßnahme, keine technisch vollständige Abschirmung.")
-    if input("Jetzt eine einzelne Batterieabfrage ausführen? [j/N] ").strip().lower() != "j":
+    print("Local MyNISSAN test: This request sends credentials directly to Nissan.")
+    print("No wallbox connection. No files are written. The result is confidential.")
+    print("Only use outside cloud agents, terminal recording and screen sharing.")
+    print("The environment check is a precaution, not a complete technical safeguard.")
+    if input("Run a single battery query now? [y/N] ").strip().lower() != "y":
         return 0
     try:
         with warnings.catch_warnings():
             # getpass must abort instead of falling back to an echoed input.
             warnings.simplefilter("error", GetPassWarning)
-            user = getpass("MyNISSAN-E-Mail (verdeckt): ")
-            password = getpass("MyNISSAN-Passwort (verdeckt): ")
-            vin = getpass("FIN (verdeckt; bei einem Fahrzeug leer lassen): ")
+            user = getpass("MyNISSAN email (hidden): ")
+            password = getpass("MyNISSAN password (hidden): ")
+            vin = getpass("VIN (hidden; leave blank for a single vehicle): ")
         # This separate process owns logging; never expose dependency debug output.
         logging.disable(logging.CRITICAL)
         status = NissanClient(user, password, vin).fetch_battery()
         measured = datetime.fromtimestamp(status.timestamp, tz=timezone.utc).astimezone()
         print("SoC: {:g} %".format(status.soc))
-        print("Messzeitpunkt: " + measured.isoformat())
+        print("Measurement time: " + measured.isoformat())
         if status.range_km is not None:
-            print("Reichweite: {:g} km".format(status.range_km))
-        print("Mit MyNISSAN vergleichen. Keine Werte, Screenshots oder Zugangsdaten in den Cloud-Chat kopieren.")
+            print("Range: {:g} km".format(status.range_km))
+        print("Compare with MyNISSAN. Do not copy values, screenshots or credentials into a cloud chat.")
         return 0
     except GetPassWarning:
-        print("Verdeckte Eingabe ist in diesem Terminal nicht möglich. Abgebrochen.")
+        print("Hidden input is unavailable in this terminal. Aborted.")
         return 2
     except NissanError as error:
-        print("Abfrage fehlgeschlagen: " + str(error))
+        print("Query failed: " + str(error))
         return 1
     except (KeyboardInterrupt, EOFError):
-        print("Abgebrochen.")
+        print("Aborted.")
         return 130
     except Exception:
         # Never print an unexpected exception/traceback with potentially private data.
-        print("Unerwarteter lokaler Fehler; keine vertraulichen Details ausgegeben.")
+        print("Unexpected local error; no confidential details were displayed.")
         return 1
 
 

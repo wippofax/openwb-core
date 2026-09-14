@@ -92,10 +92,10 @@ class PrivateTransport:
             with response:
                 body = response.read(MAX_RESPONSE + 1)
                 if len(body) > MAX_RESPONSE:
-                    raise NissanError("Nissan-Antwort ist zu groß.")
+                    raise NissanError("Nissan response is too large.")
                 return HttpResponse(response.code, dict(response.headers), body.decode("utf-8"))
         except (URLError, OSError, HTTPException, ValueError):
-            raise NissanError("Nissan ist nicht erreichbar oder liefert eine ungültige Antwort.") from None
+            raise NissanError("Nissan is unreachable or returned an invalid response.") from None
 
 
 class _LoginForm(HTMLParser):
@@ -140,17 +140,17 @@ def _object(response):
     try:
         body = json.loads(response.body)
     except (ValueError, TypeError):
-        raise NissanError("Nissan liefert keine gültige JSON-Antwort.") from None
+        raise NissanError("Nissan returned an invalid JSON response.") from None
     if not isinstance(body, dict) or body.get("errors") or body.get("error"):
-        raise NissanError("Nissan meldet einen Fehler oder ein unbekanntes Antwortformat.")
+        raise NissanError("Nissan reported an error or returned an unknown response format.")
     return body
 
 
 def _number(value, maximum=None):
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise NissanError("Nissan liefert einen ungültigen Batteriewert.")
+        raise NissanError("Nissan returned an invalid battery value.")
     if not math.isfinite(value) or value < 0 or (maximum is not None and value > maximum):
-        raise NissanError("Nissan liefert einen ungültigen Batteriewert.")
+        raise NissanError("Nissan returned an invalid battery value.")
     return float(value)
 
 
@@ -185,7 +185,7 @@ def parse_battery(body, now=None):
             distance = None
         return BatteryStatus(soc, timestamp, distance)
     except (KeyError, TypeError, ValueError, AttributeError, OverflowError):
-        raise NissanError("Nissan liefert keinen gültigen SoC mit Messzeitpunkt.") from None
+        raise NissanError("Nissan did not return a valid SoC with a measurement timestamp.") from None
 
 
 class NissanClient:
@@ -206,10 +206,10 @@ class NissanClient:
 
     def _request(self, method, url, auth_request=False, **kwargs):
         if _origin(url) not in {_origin(AUTH), _origin(BFF), _origin(USERS), _origin(CARS)}:
-            raise NissanError("Unerwartetes Nissan-Anfrageziel; Anfrage abgebrochen.")
+            raise NissanError("Unexpected Nissan request destination; request aborted.")
         remaining = self._deadline - self._clock()
         if remaining <= 0:
-            raise NissanError("Zeitlimit für die Nissan-Abfrage überschritten.")
+            raise NissanError("Nissan query time limit exceeded.")
         response = self._transport.request(method, url, timeout=min(10, remaining), **kwargs)
         if response.status == 429:
             # Avoid request storms, including on the next openWB update.
@@ -220,17 +220,17 @@ class NissanClient:
             except (StopIteration, ValueError, TypeError):
                 pass
             self._retry_at = self._clock() + delay
-            raise RateLimitError("Nissan begrenzt die Abfragen. Bitte später erneut versuchen.")
+            raise RateLimitError("Nissan is rate limiting requests. Please try again later.")
         if response.status in (401, 403) or (auth_request and response.status == 400):
-            raise AuthenticationError("Nissan lehnt die Anmeldung oder Zugriffsberechtigung ab.")
+            raise AuthenticationError("Nissan rejected the login or access authorization.")
         if response.status >= 400:
-            raise NissanError("Nissan-Dienst meldet einen HTTP-Fehler ({}).".format(response.status))
+            raise NissanError("Nissan service returned an HTTP error ({}).".format(response.status))
         return response
 
     def _json(self, method, url, **kwargs):
         response = self._request(method, url, **kwargs)
         if not 200 <= response.status < 300:
-            raise NissanError("Unerwartete Weiterleitung der Nissan-API.")
+            raise NissanError("Unexpected redirect from the Nissan API.")
         return _object(response)
 
     def _redirects(self, response, url, callback=False):
@@ -247,15 +247,15 @@ class NissanClient:
                     expected.scheme, expected.netloc, expected.path) and not parsed.fragment:
                 return response, target
             if _origin(target) != _origin(AUTH):
-                raise NissanError("Unerwartete Weiterleitung beim Nissan-Login.")
+                raise NissanError("Unexpected redirect during Nissan login.")
             response = self._request("GET", target)
             url = target
-        raise NissanError("Zu viele oder ungültige Nissan-Weiterleitungen.")
+        raise NissanError("Too many or invalid Nissan redirects.")
 
     def _login(self):
         if (not isinstance(self._user, str) or not self._user.strip()
                 or not isinstance(self._password, str) or not self._password):
-            raise AuthenticationError("MyNISSAN-Benutzername und Passwort fehlen.")
+            raise AuthenticationError("MyNISSAN username and password are required.")
         # A new login must not reuse an expired/partially authenticated web session.
         if hasattr(self._transport, "clear_cookies"):
             self._transport.clear_cookies()
@@ -271,10 +271,10 @@ class NissanClient:
         response, url = self._redirects(self._request("GET", url), url)
         form = _LoginForm.parse(response.body)
         if not form or not form["action"]:
-            raise NissanError("Nissan-Anmeldeformular nicht verfügbar; eventuell ist eine App-Anmeldung erforderlich.")
+            raise NissanError("Nissan login form is unavailable; you may need to sign in through the app.")
         target = urljoin(url, form["action"])
         if _origin(target) != _origin(AUTH):
-            raise NissanError("Unerwartetes Ziel des Nissan-Anmeldeformulars.")
+            raise NissanError("Unexpected Nissan login form destination.")
         data = dict(form["inputs"])
         region = data.get("regionCode", "")
         data.update(userName=self._user, username=region + "/" + self._user if region else self._user,
@@ -283,16 +283,17 @@ class NissanClient:
         response, callback = self._redirects(response, target, callback=True)
         parsed = urlsplit(callback)
         if (parsed.scheme, parsed.netloc, parsed.path) != ("com", "wso2.service.nci", ""):
-            raise AuthenticationError("Nissan-Login nicht abgeschlossen. Zugang und Hinweise in MyNISSAN prüfen.")
+            raise AuthenticationError(
+                "Nissan login did not complete. Check your credentials and any notices in MyNISSAN.")
         values = parse_qs(parsed.query)
         if values.get("state") != [state] or len(values.get("code", [])) != 1 or values.get("error"):
-            raise AuthenticationError("Nissan liefert keine gültige Anmeldebestätigung.")
+            raise AuthenticationError("Nissan returned an invalid login confirmation.")
         token = self._json("POST", AUTH + "oauth2/token", auth_request=True, form={
             "grant_type": "authorization_code", "redirect_uri": CALLBACK, "client_id": CLIENT_ID,
             "code": values["code"][0], "code_verifier": verifier, "scope": SCOPE})
         identity_token = token.get("id_token")
         if not isinstance(identity_token, str) or not identity_token:
-            raise AuthenticationError("Nissan liefert kein Identitätstoken.")
+            raise AuthenticationError("Nissan did not return an identity token.")
         self._install(self._json("POST", BFF + "v1/oauth2/access_token?platform=Android", auth_request=True,
                                  headers={"Authorization": identity_token, "Content-Type": "application/vnd.api+json"}))
 
@@ -300,13 +301,13 @@ class NissanClient:
         access = token.get("access_token")
         refresh = token.get("refresh_token")
         if not isinstance(access, str) or not access or (refresh is not None and not isinstance(refresh, str)):
-            raise AuthenticationError("Nissan liefert kein gültiges Zugriffstoken.")
+            raise AuthenticationError("Nissan did not return a valid access token.")
         try:
             expires = float(token.get("expires_in", 3600))
             if not math.isfinite(expires) or expires <= 0:
                 raise ValueError
         except (ValueError, TypeError):
-            raise AuthenticationError("Nissan liefert eine ungültige Token-Laufzeit.") from None
+            raise AuthenticationError("Nissan returned an invalid token lifetime.") from None
         self._access_token = access
         self._refresh_token = refresh or self._refresh_token
         self._expires_at = self._clock() + max(0, expires - 30)
@@ -336,31 +337,31 @@ class NissanClient:
 
     def _select_vehicle(self):
         if self._configured_vin and not re.fullmatch(r"[A-HJ-NPR-Z0-9]{17}", self._configured_vin):
-            raise NissanError("Die konfigurierte FIN ist ungültig.")
+            raise NissanError("The configured VIN is invalid.")
         if not self._user_id:
             user = self._get(USERS + "v1/users/current").get("userId")
             if not isinstance(user, str) or not user:
-                raise NissanError("Nissan liefert keine Benutzerzuordnung.")
+                raise NissanError("Nissan did not return a user identifier.")
             self._user_id = user
         vehicles = self._get(BFF + "v5/users/" + quote(self._user_id, safe="") + "/cars").get("data")
         if not isinstance(vehicles, list):
-            raise NissanError("Nissan liefert keine Fahrzeugliste.")
+            raise NissanError("Nissan did not return a vehicle list.")
         candidates = [v.get("vin", "").upper() for v in vehicles
                       if isinstance(v, dict) and isinstance(v.get("vin"), str)
                       and re.fullmatch(r"[A-HJ-NPR-Z0-9]{17}", v["vin"].upper())]
         if self._configured_vin:
             if self._configured_vin not in candidates:
-                raise NissanError("Die konfigurierte FIN wurde im Nissan-Konto nicht gefunden.")
+                raise NissanError("The configured VIN was not found in the Nissan account.")
             self._vin = self._configured_vin
         elif len(set(candidates)) == 1:
             self._vin = candidates[0]
         else:
-            raise NissanError("Kein eindeutiges Fahrzeug gefunden. Bitte die FIN konfigurieren.")
+            raise NissanError("Could not select a unique vehicle. Please configure the VIN.")
 
     def fetch_battery(self):
         if self._clock() < self._retry_at:
             raise RateLimitError(
-                "Nissan-Abfragen pausieren nach einer Anfragebegrenzung oder fehlgeschlagenen Anmeldung.")
+                "Nissan requests are paused after rate limiting or a failed login.")
         self._deadline = self._clock() + 60
         try:
             self._authenticate()

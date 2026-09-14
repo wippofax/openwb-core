@@ -108,19 +108,32 @@ part of the pending device validation.
 
 ## Offline evidence and remaining work
 
-The exact Core target `3ced7f9ce` passed 121 synthetic module/PHP tests and 11
-additional native-interface checks on Windows with Python 3.9.2. PHP helper
-checks ran with PHP 7.4.33. They cover origin/input validation, stdin-only worker
-input, discarded stderr, invalid/oversized/late output and cooldown persistence, account scope, expiry and concurrent lock exclusion.
-The twelve UI tests passed on development and the pinned 2.2.3 source, including
-successful zero SoC, missing range, duplicate requests, changed input and bounded
-errors, account switching, corrected passwords, provider delays and expiry. Flake8, ESLint and the pinned UI build passed. A separate browser preview
-verified the actual component using a fixed in-memory response and blocked
-connections. These checks use no real account, Nissan connection or wallbox.
+The exact Core target `3ced7f9ce` passed 122 synthetic module/PHP tests under
+Python 3.9.2 on Windows. The preceding 11 native-interface checks remain valid;
+the adapter and shared interfaces were not changed in this extension. PHP helper
+checks ran with PHP 7.4.33 and cover origin/input checks, subprocess limits,
+stderr exclusion, cooldown persistence and concurrent lock exclusion.
 
-This is not a complete Apache/PHP/worker HTTP integration test or full Core
-regression. Target Linux/ARM process behavior, file permissions, web-server
-access rules and live authentication remain to be verified under a separately
-approved device test plan. Any wallbox change requires an explicit warning and
-the owner's express approval. License/API terms review is deferred to the agreed
-later step; the project is not complete.
+The module suite now includes a complete loopback HTTP contract test with 25
+checks. Two owned PHP servers share isolated temporary state. The endpoint and
+helper are copied from the module; only the fixed Python interpreter path is
+adapted for the host, and a synthetic worker replaces the real Nissan client.
+Checks cover response codes/headers, rejection before worker startup, corrected
+login, zero SoC, account and provider cooldowns, concurrent requests through two
+servers, invalid worker output, private state and expired fixture state. This
+tests actual HTTP/PHP/process boundaries without a Nissan or wallbox connection.
+
+Sixteen UI tests passed on development and the pinned 2.2.3 source. Additional
+cases cover network failure, invalid JSON, an incomplete success response and
+the actual 75-second browser deadline using a controlled clock. A browser timeout
+now reports an explicit timeout message and releases the test button. Exceptions
+and raw response details are not shown. Flake8, ESLint and the pinned build passed.
+The isolated browser preview offers selectable synthetic success/error scenarios,
+including provider delay and a real 75-second wait; its reset clears only demo
+state. No real account or wallbox was used.
+
+This is not an Apache deployment or full Core regression. Target Linux/ARM
+execution, its Python installation, web-server permissions and live authentication
+remain to be verified under a separately approved device test plan. Any wallbox
+change requires an explicit warning and the owner's express approval. License/API
+terms review is deferred to the agreed later step; the project is not complete.

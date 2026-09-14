@@ -23,9 +23,9 @@ responses were used. Network connections were blocked in the tests.
 
 | Check | Result |
 | --- | --- |
-| Module suite including retry, diagnostics and PHP helper cases against target Core source | 121 passed |
+| Module suite including retry, diagnostics and PHP helper cases against target Core source | 122 passed |
 | Additional target-interface checks | 11 passed |
-| Settings component and integration tests | 12 passed on development and pinned target source |
+| Settings component and integration tests | 16 passed on development and pinned target source |
 | Local settings UI build | Passed, including the pinned 2.2.3 candidate |
 | Built UI loader, component chunk and configuration fields | Verified |
 
@@ -112,12 +112,18 @@ outside this check.
 
 The current candidate additionally includes a module-owned PHP test endpoint,
 stdin-only Python worker, DEBUG query diagnostics and the settings test button.
-The exact-target suite now passes 121 module/PHP checks and the same 11 native
-interface checks. PHP 7.4.33 helper tests cover origin/input checks, subprocess
-I/O limits, stderr exclusion and account-scoped cooldown storage. Twelve UI tests pass
-on both sources, and the pinned build succeeds with the existing warnings.
-The browser preview shows synthetic battery values and separate timestamps.
-Full HTTP integration and execution on target Linux/ARM remain unverified.
+The exact-target module suite now passes 122 tests. The preceding 11 native
+interface checks remain valid; the adapter and shared interfaces did not change.
+PHP 7.4.33 helper tests cover origin/input checks, subprocess I/O limits, stderr
+exclusion and account-scoped cooldown storage. Sixteen UI tests pass on both
+sources, and the pinned build succeeds with the existing warnings.
+
+The suite includes 25 loopback HTTP checks through two owned PHP servers and a
+synthetic Python worker. They exercise real HTTP, process and file-lock boundaries;
+the endpoint copy changes only the interpreter path for the Windows host. The
+browser preview offers selectable synthetic failures, and the UI reports an
+explicit timeout after 75 seconds without a response. Apache deployment and
+target Linux/ARM execution remain unverified.
 See [the detailed behavior and limits](diagnostics.md).
 
 ## Remaining validation

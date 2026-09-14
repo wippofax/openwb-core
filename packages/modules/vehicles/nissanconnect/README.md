@@ -106,10 +106,17 @@ the private cooldown metadata, access assumptions and testing limits.
 Use synthetic fixtures only. Optional PHP helper tests need `php` on PATH or
 `NISSAN_TEST_PHP` pointing to a PHP CLI executable; otherwise those tests are
 explicitly skipped. Their subprocesses use fixed synthetic programs only.
-The Python tests block socket connections, name resolution
+The Python unit tests block socket connections, name resolution
 and real vehicle queries through the replaced transport. The adapter test
 replaces the service wrapper and verifies the values passed to the real
 `CarState`; it does not test a running charging system.
+
+The optional HTTP integration test runs in a child process with two temporary
+PHP servers bound only to loopback. It copies the actual endpoint and helper,
+substitutes the local Python interpreter path and installs a fixed synthetic
+worker at the expected location. Redirects and proxies are disabled; no Nissan
+client is imported. Private fixture directories contain only invented data and
+are separate from live module state. The test stops its own servers when done.
 
 From the Core repository root, using a Python 3.9 test environment:
 

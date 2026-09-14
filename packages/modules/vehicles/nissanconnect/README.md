@@ -14,9 +14,10 @@ query intervals, errors and charge limits.
 - This is an unofficial interface derived from public implementations. Nissan
   may change the login flow or data formats. Additional login steps, consent
   and MFA are not automated; complete them in the official app if required.
-- **No successful test with a real Nissan account or wallbox yet.** A successful
-  synthetic login test does not establish compatibility with the current
-  manufacturer service.
+- **One successful manual account query has been reported by a tester:** the
+  returned data matched the official Nissan app. Only the qualitative result
+  was shared; it was not independently verified. Sustained token renewal,
+  other account configurations and wallbox integration remain untested live.
 - Only cached server data is read. No wakeup, `refresh-battery-status` or vehicle
   charging start/stop commands are sent. If Nissan's data is old, the reported
   SoC may also be old. The original timestamp is preserved so openWB can use
@@ -101,7 +102,7 @@ offline test procedure.
 1. First prepare an isolated test on a separate computer. Enter credentials
    locally using hidden input, run outside a cloud agent and compare results
    with the app locally. Do not transfer real values into the agent context.
-   No such live test has been performed yet.
+   One successful initial query has been reported; see the limitations above.
 2. Before installation, prepare a concrete plan covering the software version,
    backup, affected files, test window and recovery.
 3. **Before every wallbox change, explicitly ask for permission with a warning

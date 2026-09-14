@@ -26,6 +26,9 @@ query intervals, errors and charge limits.
   time zone or is more than five minutes in the future, produces an error.
   A missing optional range does not invalidate an otherwise valid SoC.
 
+See [the exact-version compatibility report](COMPATIBILITY.md) for the local
+openWB 2.2.3 checks, UI requirements and existing error-handling behavior.
+
 ## Configuration
 
 The module type is `nissanconnect`. The corresponding settings page is in the

@@ -71,8 +71,21 @@ are not displayed.
 Each request uses a socket timeout of at most ten seconds. No further requests
 are started after a 60-second budget. This is not a hard overall deadline for
 a socket read already in progress. Redirects and retries after rejected
-authentication are bounded. HTTP 429 triggers a cooldown of at least five
-minutes, as does a failed login. There are no unbounded retry loops or sleeps.
+authentication are bounded. Failed queries trigger pauses of 5, 10, 20, 40 and
+then at most 60 minutes. A successful query resets this sequence. HTTP 429 and
+503 also honor `Retry-After` in seconds or HTTP-date form, bounded to 5 minutes
+through 24 hours. A deferred update makes no HTTP request and does not extend
+the pause. openWB's configured intervals can delay the next actual attempt
+further. There are no unbounded retry loops or sleeps.
+
+Authorization failures clear the rejected tokens. Network or service errors
+keep the current authentication state for reuse or normal renewal. Pauses keep
+only a bounded error message and its category, not an exception traceback;
+all retry state is in memory and resets with the client.
+
+See [error behavior and the Volkswagen comparison](error-handling.md) for the
+shared energy fallback and the unresolved charging policy when it is unavailable.
+These request pauses do not pause charging or override openWB's error counter.
 
 ## Offline validation
 

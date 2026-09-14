@@ -23,7 +23,7 @@ responses were used. Network connections were blocked in the tests.
 
 | Check | Result |
 | --- | --- |
-| Existing module suite against target Core source | 60 passed |
+| Module suite including retry/error cases against target Core source | 76 passed |
 | Additional target-interface checks | 11 passed |
 | Settings component and integration tests | 3 passed on development and pinned target source |
 | Local settings UI build | Passed, including the pinned 2.2.3 candidate |
@@ -66,6 +66,11 @@ Relevant target sources:
 - [Vehicle wrapper and fallback](https://github.com/openWB/core/blob/3ced7f9cef3c70980ee1fab670f0d0717d1809ca/packages/modules/common/configurable_vehicle.py)
 - [SoC scheduler error handling](https://github.com/openWB/core/blob/3ced7f9cef3c70980ee1fab670f0d0717d1809ca/packages/modules/update_soc.py)
 - [Module discovery](https://github.com/openWB/core/blob/3ced7f9cef3c70980ee1fab670f0d0717d1809ca/packages/modules/configuration.py)
+
+The retry/error extension was checked again against a fresh export of the same
+target: 76 module tests and all 11 additional interface checks passed. See
+[the Volkswagen comparison and error-policy boundary](error-handling.md).
+Request backoff does not change the scheduler's zero-SoC policy or stop charging.
 
 ## Settings UI installation boundary
 

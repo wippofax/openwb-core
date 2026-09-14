@@ -158,7 +158,7 @@ def test_401_retries_once_then_stops_and_cools_down():
     with pytest.raises(AuthenticationError, match="Nissan"):
         client.fetch_battery()
     count = len(transport.calls)
-    with pytest.raises(RateLimitError):
+    with pytest.raises(AuthenticationError, match="paused"):
         client.fetch_battery()
     assert len(transport.calls) == count
 
@@ -293,3 +293,85 @@ def test_total_request_budget_stops_redirect_chain():
     with pytest.raises(NissanError, match="time limit"):
         client.fetch_battery()
     assert len(transport.calls) == 1
+
+
+@pytest.mark.parametrize("response", [
+    reply("synthetic-private-body", 500), reply("synthetic-private-body", 503),
+    reply("not-json"), reply(battery(soc=None)),
+])
+def test_failed_query_pauses_without_reauthentication_and_recovers(response, caplog):
+    client, transport, ticks = make_client(full_script() + [response, reply(battery(48))])
+    client.fetch_battery()
+    with pytest.raises(NissanError):
+        client.fetch_battery()
+    count = len(transport.calls)
+    ticks[0] = 299
+    with pytest.raises(NissanError, match="paused") as error:
+        client.fetch_battery()
+    assert len(transport.calls) == count
+    assert "synthetic-private-body" not in str(error.value)
+    ticks[0] = 300
+    assert client.fetch_battery().soc == 48
+    assert len(transport.calls) == count + 1
+    assert not caplog.records
+
+
+def test_repeated_outages_back_off_to_one_hour_and_success_resets_delay():
+    client, transport, ticks = make_client(full_script())
+    client.fetch_battery()
+    for delay in (300, 600, 1200, 2400, 3600, 3600):
+        transport.responses.append(reply("synthetic-private-body", 503))
+        with pytest.raises(NissanError):
+            client.fetch_battery()
+        count = len(transport.calls)
+        ticks[0] += delay - 1
+        with pytest.raises(NissanError, match="paused"):
+            client.fetch_battery()
+        assert len(transport.calls) == count
+        ticks[0] += 1
+        # Keep the synthetic token alive; expiry/renewal is tested separately.
+        client._expires_at = ticks[0] + 7200
+    transport.responses.extend([reply(battery(49)), reply("private", 503)])
+    assert client.fetch_battery().soc == 49
+    with pytest.raises(NissanError):
+        client.fetch_battery()
+    ticks[0] += 300
+    transport.responses.append(reply(battery(50)))
+    assert client.fetch_battery().soc == 50
+
+
+@pytest.mark.parametrize("status", [429, 503])
+@pytest.mark.parametrize("header,expected_delay", [
+    ("1200", 1200), ("Sun, 02 Jan 2022 00:20:00 GMT", 1200),
+    ("Sun, 02 Jan 2022 00:01:00 GMT", 300), ("-1", 300), ("bad-date", 300),
+])
+def test_retry_after_seconds_and_http_date_are_respected(status, header, expected_delay):
+    client, transport, ticks = make_client(full_script() + [
+        reply("private", status, {"rEtRy-AfTeR": header}), reply(battery())])
+    client.fetch_battery()
+    with pytest.raises(NissanError):
+        client.fetch_battery()
+    count = len(transport.calls)
+    ticks[0] = expected_delay - 1
+    with pytest.raises(NissanError, match="paused"):
+        client.fetch_battery()
+    assert len(transport.calls) == count
+    ticks[0] = expected_delay
+    assert client.fetch_battery().soc == 47
+
+
+def test_timeout_pauses_requests_without_retaining_exception_traceback():
+    def timeout(calls):
+        raise NissanError("Nissan is unreachable or returned an invalid response.")
+    client, transport, ticks = make_client(full_script() + [timeout, reply(battery())])
+    client.fetch_battery()
+    with pytest.raises(NissanError):
+        client.fetch_battery()
+    count = len(transport.calls)
+    for _ in range(5):
+        with pytest.raises(NissanError, match="paused"):
+            client.fetch_battery()
+    assert len(transport.calls) == count
+    assert not any(isinstance(value, BaseException) for value in vars(client).values())
+    ticks[0] = 300
+    assert client.fetch_battery().soc == 47

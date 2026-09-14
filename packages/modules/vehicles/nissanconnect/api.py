@@ -6,6 +6,7 @@ Credentials, cookies and tokens stay in memory. Never log transport payloads.
 import base64
 from dataclasses import dataclass, field
 from datetime import datetime
+from email.utils import parsedate_to_datetime
 import hashlib
 from html.parser import HTMLParser
 from http.client import HTTPException
@@ -202,6 +203,9 @@ class NissanClient:
         self._user_id = None
         self._vin = None
         self._retry_at = 0
+        self._failed_queries = 0
+        self._retry_error_type = NissanError
+        self._retry_reason = ""
         self._deadline = None
 
     def _request(self, method, url, auth_request=False, **kwargs):
@@ -211,21 +215,30 @@ class NissanClient:
         if remaining <= 0:
             raise NissanError("Nissan query time limit exceeded.")
         response = self._transport.request(method, url, timeout=min(10, remaining), **kwargs)
+        if response.status in (429, 503):
+            self._retry_at = self._clock() + self._retry_after(response)
         if response.status == 429:
-            # Avoid request storms, including on the next openWB update.
-            delay = 300
-            try:
-                raw_delay = next(v for k, v in response.headers.items() if k.lower() == "retry-after")
-                delay = max(300, min(int(raw_delay), 86400))
-            except (StopIteration, ValueError, TypeError):
-                pass
-            self._retry_at = self._clock() + delay
             raise RateLimitError("Nissan is rate limiting requests. Please try again later.")
         if response.status in (401, 403) or (auth_request and response.status == 400):
             raise AuthenticationError("Nissan rejected the login or access authorization.")
         if response.status >= 400:
             raise NissanError("Nissan service returned an HTTP error ({}).".format(response.status))
         return response
+
+    def _retry_after(self, response):
+        """Accept delay seconds or an HTTP date; bound server-directed pauses."""
+        value = next((v for k, v in response.headers.items() if k.lower() == "retry-after"), None)
+        try:
+            delay = int(value)
+        except (ValueError, TypeError, OverflowError):
+            try:
+                deadline = parsedate_to_datetime(value)
+                if deadline.tzinfo is None:
+                    raise ValueError
+                delay = deadline.timestamp() - self._wall_clock()
+            except (ValueError, TypeError, AttributeError, OverflowError):
+                delay = 300
+        return max(300, min(delay, 86400))
 
     def _json(self, method, url, **kwargs):
         response = self._request(method, url, **kwargs)
@@ -360,20 +373,32 @@ class NissanClient:
 
     def fetch_battery(self):
         if self._clock() < self._retry_at:
-            raise RateLimitError(
-                "Nissan requests are paused after rate limiting or a failed login.")
+            remaining = math.ceil(self._retry_at - self._clock())
+            raise self._retry_error_type(
+                "Nissan requests are paused for {} more seconds. {}".format(remaining, self._retry_reason))
         self._deadline = self._clock() + 60
         try:
             self._authenticate()
             if not self._vin:
                 self._select_vehicle()
             body = self._get(CARS + "v1/cars/" + self._vin + "/battery-status")
-            return parse_battery(body, now=self._wall_clock())
-        except AuthenticationError:
-            # Rejected credentials must not trigger a new login on every scheduler tick.
-            self._access_token = self._refresh_token = None
-            self._user_id = self._vin = None
-            self._retry_at = self._clock() + 300
+            result = parse_battery(body, now=self._wall_clock())
+            self._failed_queries = 0
+            self._retry_at = 0
+            self._retry_error_type = NissanError
+            self._retry_reason = ""
+            return result
+        except NissanError as error:
+            if isinstance(error, AuthenticationError):
+                self._access_token = self._refresh_token = None
+                self._user_id = self._vin = None
+            # Do not sleep in an openWB worker or retain exception tracebacks.
+            # A successful query resets this backoff; deferred calls do not extend it.
+            self._failed_queries = min(self._failed_queries + 1, 5)
+            delay = min(300 * 2 ** (self._failed_queries - 1), 3600)
+            self._retry_at = max(self._retry_at, self._clock() + delay)
+            self._retry_error_type = type(error)
+            self._retry_reason = str(error)
             raise
         finally:
             self._deadline = None

@@ -205,7 +205,9 @@ References:
 - [NissanConnect reference at the recorded revision](https://github.com/dan-r/HomeAssistant-NissanConnect/tree/b0bafe9108d4574e243aa182324584dbc68369ad)
 - [OneID migration](https://github.com/dan-r/HomeAssistant-NissanConnect/pull/119)
 
-See `NOTICE.md` for the recorded reference attribution and
-[contribution/source review](contribution-review.md) for the repository split,
-dependency inventory, prepared reviewer summary and remaining license/terms
-checks. This inventory does not establish service access permission.
+See [NOTICE.md](NOTICE.md) for attribution and the dated adaptation notice,
+[license and service-terms review](license-review.md) for the verified source
+licenses and open service-access/distribution questions, and
+[contribution/source review](contribution-review.md) for the repository split
+and prepared reviewer summary. Software license compatibility does not establish
+permission to use the unofficial API client.

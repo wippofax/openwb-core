@@ -1,6 +1,7 @@
 """MyNISSAN EU/OneID client. Only cached battery data; no vehicle commands.
 
 Protocol adapted from HomeAssistant-NissanConnect; see NOTICE.md for attribution.
+Adapted for openWB by phelix, 2026-09-11 through 2026-10-02, under GPLv3.
 Credentials, cookies and tokens stay in memory. Never log transport payloads.
 """
 import base64

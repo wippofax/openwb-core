@@ -1,9 +1,26 @@
 # Third-party attribution
 
+This openWB integration follows the repository's GNU GPL version 3 license.
+The adapted MIT source retains the notice below; this file does not relicense
+the complete module under MIT or grant access to Nissan services.
+
 The MyNISSAN EU protocol and login flow in api.py are adapted from
-[HomeAssistant-NissanConnect](https://github.com/dan-r/HomeAssistant-NissanConnect),
+[HomeAssistant-NissanConnect](https://github.com/dan-r/HomeAssistant-NissanConnect/tree/b0bafe9108d4574e243aa182324584dbc68369ad),
 revision b0bafe9108d4574e243aa182324584dbc68369ad.
-The reference credits work by mitchellrj and Tobiaswk.
+Its client credits @mitchellrj and @Tobiaswk and explicitly states that portions
+were relicensed from Apache License, Version 2.0 with permission. We preserve
+that upstream provenance statement and rely on the reference's published MIT
+grant. The earlier kamereon-python client credits Richard Mitchell (2020);
+dartnissanconnect credits Tobias Westergaard Kjeldsen (2021).
+
+Adapted for openWB by phelix, 2026-09-11 through 2026-10-02: standard-library
+transport, bounded authentication and battery validation, passive queries,
+retry/error handling, native module integration and synthetic tests. The
+reference project is not responsible for these modifications.
+
+See [license-review.md](license-review.md) for exact provenance, distribution
+obligations and unresolved service terms. Nissan and MyNISSAN are referenced
+to identify compatibility; this is an independent, unofficial integration.
 
 MIT License
 

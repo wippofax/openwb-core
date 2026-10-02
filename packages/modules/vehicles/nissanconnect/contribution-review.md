@@ -1,8 +1,9 @@
 # Contribution and source review
 
-Offline inventory dated 2026-10-02. This prepares review; it is not a license
-compatibility opinion, permission to use an API or authorization to publish.
-Current legal/service terms and dependency advisories remain separate work.
+Inventory dated 2026-10-02, updated after the authorized public-source license
+review. See [license-review.md](license-review.md) for the source-license result,
+dated evidence and unresolved service-access/release-packaging questions.
+Dependency advisories and final privacy review remain separate work.
 
 ## Contribution split
 
@@ -33,14 +34,15 @@ its inherited MQTT log-redaction finding. Do not silently enlarge them.
 | openWB Core | Repository `LICENSE` contains GPL version 3 text; target `3ced7f9cef3c70980ee1fab670f0d0717d1809ca` | Integration APIs and neighboring-module conventions. Confirm final licensing notices and contribution requirements before publication. |
 | openWB settings | Repository `LICENSE` contains GPL version 3 text; development overlay `776a60d762b59be12b147ca4e37cb715fcfb0c82` | Vue component, inherited UI and build chain. A LICENSE file alone does not resolve every bundled asset's terms. |
 | Pinned 2.2.3 settings | `e8de268fa25f7efca2b5ffc005a757a2f36b530f`, recorded maintainer fork `Brett-S-OWB/openwb-ui-settings_BS_folk`; preparation script and compatibility guide | Build basis for the candidate. Use this lockfile for candidate review, not the newer development dependency versions. |
-| HomeAssistant-NissanConnect | `NOTICE.md` records `dan-r/HomeAssistant-NissanConnect` revision `b0bafe9108d4574e243aa182324584dbc68369ad` and an MIT notice for Daniel Raper (2024) | Adapted EU/OneID protocol/login flow in `api.py`. Recheck upstream revision, actual reused portions, notice accuracy and modification obligations against the original source before closure. |
-| `Tobiaswk/dartnissanconnect`, mitchellrj work | Original research reference; the recorded primary reference credits these authors | No Dart package is imported/bundled by this module. Do not infer absence of indirect derivation: confirm attribution chain and applicable source licenses during the online provenance review. |
+| HomeAssistant-NissanConnect | `NOTICE.md` records `dan-r/HomeAssistant-NissanConnect` revision `b0bafe9108d4574e243aa182324584dbc68369ad` and an MIT notice for Daniel Raper (2024) | Adapted EU/OneID protocol/login flow in `api.py`. Pinned source and MIT text verified; provenance and modification notice retained in NOTICE.md. |
+| `Tobiaswk/dartnissanconnect`, mitchellrj work | Original research reference; the recorded primary reference credits these authors | No Dart package is imported/bundled by this module. MIT Dart license and Apache-2.0 Python origin verified. The direct HA client explicitly states permission to relicense Apache portions; see the detailed review. |
 | Python/PHP/runtime libraries | Python standard library imports in the API/worker/probe; existing openWB helper imports in the adapter; PHP built-ins | No new Python package, requirements-file change or mandatory PHP extension. Runtime/OpenSSL/distribution updates and licenses remain inherited platform responsibilities. |
 | Vue/build dependencies | Existing UI `package.json` and `package-lock.json` at both revisions above | The Nissan component adds no dependency. Transitive licenses/notices and final build artifacts still require review. |
 
-`NOTICE.md` is retained unchanged. The inventory does not relabel third-party
-code, remove attribution or claim that public source permits unofficial service
-access. No source package was downloaded in this pass.
+`NOTICE.md` preserves the original MIT text and now records upstream relicensing
+and the dated openWB adaptation. Public source/license texts and one small npm
+tarball were retrieved for verification, without installing packages. No
+unofficial service-access permission is inferred from a software license.
 
 ## Dependency metadata gaps
 
@@ -53,18 +55,19 @@ This enumeration is metadata, not an artifact-level license audit or an SBOM.
 Four target entries have no `license` field: `console-browserify` 1.2.0,
 `querystring-es3` 0.2.1, `timers-browserify` 1.4.2 and `urlsafe-base64` 1.0.0.
 The development lock additionally lacks the field for `vue-color` 3.3.3.
-Existing local package metadata/license files supply MIT notices for the first
-three and `vue-color`. Their local contents have not been reauthenticated
-against registry tarball integrity in this pass. No license declaration/file
-was found in the inspected local `urlsafe-base64` package or its README.
+Existing local package metadata/license files supply MIT notices for all five.
+The earlier statement that `urlsafe-base64` lacked a license was incorrect:
+the lowercase `readme.md` contains its MIT notice. The exact registry tarball
+matches the target/development lockfile integrity and the inspected installed
+files. The other four packages' local license evidence was not independently
+reauthenticated against registry tarballs in this pass.
 
-**BP-LIC-01 (open):** resolve `urlsafe-base64` provenance/license and verify the
-notices actually required by the final distributed bundle. Missing metadata
-does not establish either prohibition or permission. Do not update or replace
-shared dependencies merely to make this inventory appear complete. Current
-advisory checks and relevant authoritative license texts require the later
-online pass. Inherited dependency changes between the two UI bases are not
-changes introduced by the Nissan component.
+**BP-LIC-01 resolved:** the apparent provenance gap was a search error.
+**BP-LIC-02 remains open for a final binary release:** verify shipped third-party
+notices and corresponding source against that actual build. Missing metadata
+does not establish incompatibility. No dependency upgrade or replacement was
+necessary; the Nissan component adds no dependency. See the detailed license
+review for the bounded artifact inspection and the remaining release check.
 
 ## Coding conventions and interface review
 
@@ -109,7 +112,7 @@ sustained token renewal, charging acceptance and saved-settings removal remain
 open. No captured responses, screenshots or credentials belong in a contribution.
 
 Before submission, close or explicitly disposition the PHP hardening, inherited
-logging issue, source/dependency licenses, service terms/privacy review and
+logging issue, final distribution notices, service terms/privacy review and
 device acceptance; then refresh this summary for the actual final revisions.
 No fork, hosted request, push or upstream communication was performed by this
 offline review.

@@ -3,7 +3,9 @@
 Inventory dated 2026-10-02, updated after the authorized public-source license
 review. See [license-review.md](license-review.md) for the source-license result,
 dated evidence and unresolved service-access/release-packaging questions.
-Dependency advisories and final privacy review remain separate work.
+The [offline release review](release-review.md) records secret scans, the updated
+pinned build and inherited dependency advisories. Their disposition, legacy
+bundle notices and final privacy review remain open.
 
 ## Contribution split
 

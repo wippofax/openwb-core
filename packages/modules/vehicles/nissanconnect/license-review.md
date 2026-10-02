@@ -160,3 +160,12 @@ attribute from cockpit `totalMileage`. The new parser/transport/error policy
 are implemented locally, and the existing MIT notice remains applicable.
 No new package or license is introduced. Live Leaf availability and service
 access remain separate acceptance and terms questions.
+
+## Updated build notice evidence (2026-10-02)
+
+The [offline release review](release-review.md) records a rebuilt odometer/UI
+candidate with full notice text for all 126 npm package locations found in its
+Vite output/CSS graph, plus the exact prepared source archive. BP-LIC-02 remains
+partly open for independent prebuilt legacy vendor bundles and final publication
+packaging. No service-access permission or legal approval follows from this
+artifact check. The frozen installed candidate is unchanged.

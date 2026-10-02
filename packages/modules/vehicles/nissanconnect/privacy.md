@@ -109,8 +109,10 @@ state format is bounded to 128 KiB.
 
 The prepared private-state hardening validates Linux ownership, 0700/0600
 modes, file type/link count and descriptor/path identity. It refuses unsafe
-existing state without deleting it or repairing permissions. **BP-SEC-01 stays
-open until PHP/Linux verification**; these new checks are not deployed. Root
+existing state without deleting it or repairing permissions. **BP-SEC-01 is
+corrected and locally verified**: all 12 previously skipped Linux cases pass
+in WSL2/Debian 13 as an ordinary user, including the synthetic HTTP contract.
+These new checks are not deployed; ARM/Apache acceptance remains separate. Root
 and other code running as the same UID remain outside the isolation boundary.
 
 The pinned `runs/backup.sh` copies both MQTT databases and broker configuration
@@ -136,8 +138,9 @@ password at overall project completion and update the new value only privately.
   success, failures, deferred calls and redaction of module diagnostics.
 - `web/settings/modules/vehicles/nissanconnect/{test_connection,connection_test_lib}.php`:
   origin/input checks, subprocess flow, cooldown persistence and filesystem
-  source review. Windows PHP 7.4.33 now passes the portable checks; actual
-  Linux ownership/mode and hardened HTTP checks remain deferred.
+  source review. Windows PHP 7.4.33 passes the portable checks. Linux PHP 8.4.26
+  passes 57 endpoint/state cases with one expected non-Linux skip, including
+  actual ownership/mode checks and the hardened HTTP contract on native tmpfs.
 - UI `vehicle.vue`, its integration tests and pinned preparation script:
   in-memory input/results, account switching, fixed errors, ignored late results
   and removal of the three known payload-bearing console statements.
@@ -152,7 +155,7 @@ correction. Two additional token tests verify rotation and no password-login
 fallback on a refresh service outage. These are offline results, not live API
 acceptance or a hard deadline for an already active scheduled socket read.
 
-Remaining work includes actual PHP/Linux execution, dependency advisories,
+Remaining work includes target ARM/Apache acceptance, dependency advisories,
 current authoritative privacy/service terms, Cloud/service recipient and
 retention information, and separately approved device acceptance. Technical
 source review alone cannot establish GDPR/BDSG compliance or actual deletion.

@@ -102,8 +102,13 @@ On 2026-10-02 the full affected module suite passed **182 tests** using
 Python 3.9.2 and an already present portable Windows PHP 7.4.33 interpreter.
 This includes 136 Python cases and 46 portable PHP cases; both module-owned
 PHP files also pass syntax checking. No download or installation was needed.
-**12 Linux-only cases remain skipped**, including actual ownership/mode checks
-and the hardened HTTP contract. BP-SEC-01 remains open until those checks run.
+The subsequent WSL2 run on Debian 13 x86_64, Python 3.13.5 and PHP 8.4.26
+passed **57 endpoint/state tests**, including all 12 cases skipped on Windows.
+One non-Linux-only guard test was correctly skipped. Both PHP files pass syntax
+checks on Linux. Tests ran as an ordinary user on Linux tmpfs with synthetic
+fixtures and loopback HTTP servers. BP-SEC-01 is corrected and locally verified;
+the hardening is not deployed. This is not ARM/Apache or target-version Linux
+acceptance. See [the Linux verification record](COMPATIBILITY.md#linux-php-verification-2026-10-02).
 The updated Nissan UI passes 24 tests and ESLint; the prior pinned build predates the odometer extension. These are
 affected-area checks, not complete openWB regression or release validation.
 
@@ -112,8 +117,8 @@ module queries, with overnight log/GUI activity. Precise automatic cadence,
 sustained token renewal, charging acceptance and saved-settings removal remain
 open. No captured responses, screenshots or credentials belong in a contribution.
 
-Before submission, close or explicitly disposition the PHP hardening, inherited
-logging issue, final distribution notices, service terms/privacy review and
+Before submission, close or explicitly disposition the inherited logging issue,
+final distribution notices, service terms/privacy review and
 device acceptance; then refresh this summary for the actual final revisions.
 No fork, hosted request, push or upstream communication was performed by this
 offline review.

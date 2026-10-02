@@ -126,9 +126,34 @@ explicit timeout after 75 seconds without a response. Apache deployment and
 target Linux/ARM execution remain unverified.
 See [the detailed behavior and limits](diagnostics.md).
 
+## Linux PHP verification (2026-10-02)
+
+After the owner's Windows restart, WSL 3.0.1 and Debian 13 (WSL2) started
+successfully. The current module endpoint/test source was exported from Core
+`d3f1cd3b355fd7e6fa3e3170c56f0ba8145f4c9c`; the eight-file public archive has
+SHA-256 `652647f79766da7569d31e1b749da6129e52845b6128086560436ad8555d097f`.
+It contains only the license, empty module initializer, fixture, three test
+files and two PHP files. No account, wallbox or private runtime data is included.
+
+Environment: Linux `6.18.40.1-microsoft-standard-WSL2`, x86_64, Python 3.13.5,
+pytest 8.3.5, PHP CLI 8.4.26 with `-n`. Tests ran as an ordinary user in a fresh
+Linux tmpfs directory, not as root or on the mounted Windows filesystem.
+The three suites `connection_test_endpoint_test.py`,
+`connection_test_state_test.py` and `connection_test_http_test.py` passed
+**57 tests**. The one expected skip checks unsupported non-Linux platforms.
+All 12 cases skipped in the earlier Windows run now pass, including real
+permission/link checks and the two-server synthetic HTTP contract. Both PHP
+files also pass `php -n -l`. No source/test correction was necessary.
+
+BP-SEC-01 is corrected and locally verified. Windows PHP 7.4.33 portable checks
+and Linux PHP 8.4.26 filesystem/HTTP checks are complementary evidence, not an
+exact target-runtime matrix. This run does not establish ARM, Apache module,
+full openWB, charging or real Nissan behavior. The hardened code and odometer
+extension remain undeployed; the frozen candidate and wallbox are unchanged.
+
 ## Remaining validation
 
-- Linux/ARM execution and a complete openWB runtime with real MQTT storage.
+- Target ARM/Apache execution and a complete openWB runtime with real MQTT storage.
 - Sustained authentication and token renewal with a real account.
 - The prepared settings UI together with the real target Core, MQTT and storage.
 - Controlled charging tests covering stale data, API outages, error-counter

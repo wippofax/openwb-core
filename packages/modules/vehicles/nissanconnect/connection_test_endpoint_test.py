@@ -128,3 +128,20 @@ def test_php_global_lock_rejects_a_concurrent_handle_without_delay(tmp_path):
                '$first = flock($a, LOCK_EX | LOCK_NB); $second = flock($b, LOCK_EX | LOCK_NB); '
                'flock($a, LOCK_UN); $after = flock($b, LOCK_EX | LOCK_NB); '
                'echo json_encode([$first, $second, $after]); fclose($a); fclose($b);', str(path)) == [True, False, True]
+
+
+@pytest.mark.parametrize('value,success', [
+    (0, True), (12345.6, True), (None, True), (-1, False), ('12345', False), (True, False)])
+def test_php_optional_odometer_validation(value, success):
+    result = {'success': True, 'code': 'success', 'query': {
+        'outcome': 'success', 'soc': 47, 'range_km': None, 'odometer_km': value,
+        'request_started_at': '2022-01-01T00:00:00Z', 'completed_at': '2022-01-01T00:00:01Z',
+        'measurement_at': '2022-01-01T00:00:00Z', 'provider_retry_after_seconds': 900}}
+    returned = php('$file = tmpfile(); $state = nissan_test_load_state($file, 1000); '
+                   '$result = nissan_test_record_result($state, "synthetic", json_decode($argv[2], true), 1000); '
+                   'echo json_encode([$result, $state]); fclose($file);', json.dumps(result))
+    assert returned[0]['success'] is success
+    if success:
+        assert returned[0]['query']['odometer_km'] == value
+        assert returned[1]['provider_until'] == 1900
+        assert 'odometer' not in json.dumps(returned[1])

@@ -122,3 +122,31 @@ real wrapper's fallback and the scheduler's zero policy using in-memory stores
 and publication. They do not run a full charging system. Sustained private
 authentication, Linux/ARM execution and separately approved device tests remain
 necessary. The deferred source/API license and terms review is still open.
+
+## Optional odometer and explicit refresh commands
+
+A cockpit GET follows battery success in module/connection-test/probe calls.
+Invalid or missing totalMileage yields no odometer. A cockpit HTTP/transport
+failure retains the valid SoC and pauses only cockpit attempts for five minutes.
+Rate limiting and explicit provider Retry-After advice retain the client-wide
+pause, even when the current battery result succeeded. No old odometer is
+retained as a fresh reading. The normal Core timestamp/charging policy is unchanged.
+
+In the pinned 2.2.3 VW ID implementation, the executed path is
+`VwGroup.request_data -> libvwid.get_status -> Connection.update -> Vehicle.update`
+and selective-status GET requests. The library also defines `set_refresh` and
+`wakeUpVehicle`, the latter posting to `vehiclewakeuptrigger`, but that normal
+SoC path does not call them. A repository-wide search at that revision found
+no caller of set_refresh; wakeUpVehicle is referenced only inside that method.
+Its success branch also calls wait_for_data_refresh, whose definition is absent
+from the checked tree, so the unused helper is not proven ready to enable.
+Token refresh renews authentication, not vehicle data. The shared manual-refresh flag schedules the same updater; the VW adapter
+does not distinguish it as a wake command. This source finding makes no claim
+about current VW service availability. The newer development checkout instead
+contains `vweuda`, which polls data-portal datasets and likewise exposes no
+vehicle wake action in its module adapter.
+
+The Nissan module also has no wake command, including from the Color-theme
+refresh button. Passive retrieval must not be described as forcing the car to
+send a new measurement. The theme's pending indicator issue is documented in
+[diagnostics](diagnostics.md); it is separate from wake support.

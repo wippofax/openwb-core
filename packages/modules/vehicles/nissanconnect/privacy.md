@@ -19,12 +19,12 @@ releases or the effective configuration of any particular wallbox.
 | Saved account configuration for automatic queries | Standard `openWB/set/vehicle/<id>/soc_module/config` and retained `openWB/vehicle/<id>/soc_module/config`, Core memory, local broker persistence, permitted MQTT subscribers and the settings browser | Stored as ordinary configuration, without module-level encryption or automatic expiry. MQTT access control is inherited from the installation. |
 | Login forms, credentials, cookies, identity/access/refresh tokens | Wallbox Python process and fixed HTTPS Nissan/OneID/Kamereon endpoints in `api.py` | Tokens and cookies stay in the client object. A new configuration creates a new client. Process exit/discard releases references; Python does not promise secure memory erasure. Host swap, crash dumps and monitoring are outside this guarantee. |
 | Account ID and VIN returned by Nissan | Client memory and authenticated API requests to the fixed service origins | Used to select a vehicle and retrieve battery status; no module-written cache or diagnostic identifier. |
-| SoC, optional range and measurement time | API response, `CarState`, existing Core state/MQTT topics and normal display | Core owns stored values and histories. A new request does not invent a new measurement time. Existing subscribers, histories and backups have their own lifecycle. |
-| Query outcome, phase, HTTP status/count, query/measurement times, battery values and retry delays | `last_query` in memory; scheduled adapter writes its allowlisted summary at DEBUG; unsaved test returns the summary to PHP and selected fields to the browser | Still confidential vehicle/activity data even without a VIN or username. No complete response, URL, cookie or token is deliberately logged by this module. |
+| SoC, optional range/odometer and battery measurement time | API response, `CarState`, existing Core state/MQTT topics and normal display | Core owns stored values and histories. A new request does not invent a new measurement time. Existing subscribers, histories and backups have their own lifecycle. |
+| Query outcome, phase, HTTP status/count, query/measurement times, battery/odometer values and retry delays | `last_query` in memory; scheduled adapter writes its allowlisted summary at DEBUG; unsaved test returns the summary to PHP and selected fields to the browser | Still confidential vehicle/activity data even without a VIN or username. No complete response, URL, cookie or token is deliberately logged by this module. |
 | Account cooldown digest, local HMAC key and expiry times | PHP temporary directory `openwb-nissanconnect-test/state`; browser account countdown map | Account digests are pseudonymous, not anonymous: the file also holds the key and permits testing guessed account names. Browser keys contain normalized account names in memory. |
 
 The standalone `probe.py` instead reads credentials with hidden terminal input
-and prints battery values in that private terminal. It does not use MQTT or
+and prints battery/odometer values in that private terminal. It does not use MQTT or
 the settings endpoint. Agent/TTY checks are precautions, not protection against
 terminal recording, screen sharing or host inspection.
 
@@ -55,7 +55,7 @@ that enabling Cloud guarantees they stay local. No private bridge file was read.
 
 ## Logs and inherited limitation
 
-The module's scheduled log summary deliberately includes SoC/range and times.
+The module's scheduled log summary deliberately includes SoC/range, optional odometer and times.
 The isolated connection-test worker disables logging; its PHP parent discards
 stderr and returns fixed error codes instead of exception details. The endpoint
 uses `Cache-Control: no-store`; its POST body does not appear in the URL. Server
@@ -156,3 +156,16 @@ Remaining work includes actual PHP/Linux execution, dependency advisories,
 current authoritative privacy/service terms, Cloud/service recipient and
 retention information, and separately approved device acceptance. Technical
 source review alone cannot establish GDPR/BDSG compliance or actual deletion.
+
+## Odometer extension (2026-10-02)
+
+The existing car-adapter recipient now also receives a passive cockpit GET
+for the same selected VIN. Only totalMileage is extracted. This adds total
+kilometres to client memory, CarState, the standard odometer MQTT topic, normal
+status/charge-log/CSV consumers, DEBUG diagnostics and private test results.
+Existing MQTT/Cloud access and backup boundaries apply to this added activity
+data too; the module does not create another recipient, file or retention policy.
+The cockpit's other attributes are not retained in module results or logs.
+The odometer measurement time is unknown and is not borrowed from the battery.
+Unavailable odometer data is not replaced with a previous response. Review this
+additional field in final privacy information and any device acceptance.

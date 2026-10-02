@@ -44,13 +44,14 @@ def test_diagnostics_distinguish_contact_measurement_failure_and_deferred_update
 
 
 def test_worker_returns_only_query_result_and_does_not_log(caplog):
-    client, transport, _ = make_client(full_script())
+    client, transport, _ = make_client(full_script() + [reply({"data": {"attributes": {"totalMileage": 12345.6}}})])
     result = run_test({'user_id': 'synthetic@example.invalid', 'password': 'synthetic-password'},
                       client_factory=lambda *args: client)
     assert result['success'] is True
     assert result['query']['soc'] == 47
     assert result['query']['data_age_seconds'] == 86400
-    assert len(transport.calls) == 7
+    assert len(transport.calls) == 8
+    assert result["query"]["odometer_km"] == 12345.6
     assert not caplog.records
     for value in ('synthetic-password', 'example.invalid', VIN, 'synthetic-access'):
         assert value not in json.dumps(result)

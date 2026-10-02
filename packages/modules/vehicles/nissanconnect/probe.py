@@ -29,7 +29,7 @@ def main():
     print("No wallbox connection. No files are written. The result is confidential.")
     print("Only use outside cloud agents, terminal recording and screen sharing.")
     print("The environment check is a precaution, not a complete technical safeguard.")
-    if input("Run a single battery query now? [y/N] ").strip().lower() != "y":
+    if input("Query cached battery and odometer data now? [y/N] ").strip().lower() != "y":
         return 0
     try:
         with warnings.catch_warnings():
@@ -40,12 +40,16 @@ def main():
             vin = getpass("VIN (hidden; leave blank for a single vehicle): ")
         # This separate process owns logging; never expose dependency debug output.
         logging.disable(logging.CRITICAL)
-        status = NissanClient(user, password, vin).fetch_battery()
+        status = NissanClient(user, password, vin).fetch_battery(include_odometer=True)
         measured = datetime.fromtimestamp(status.timestamp, tz=timezone.utc).astimezone()
         print("SoC: {:g} %".format(status.soc))
         print("Measurement time: " + measured.isoformat())
         if status.range_km is not None:
             print("Range: {:g} km".format(status.range_km))
+        if status.odometer_km is not None:
+            print("Odometer: {:g} km (measurement time unavailable)".format(status.odometer_km))
+        else:
+            print("Odometer: Not available; battery query succeeded.")
         print("Compare with MyNISSAN. Do not copy values, screenshots or credentials into a cloud chat.")
         return 0
     except GetPassWarning:

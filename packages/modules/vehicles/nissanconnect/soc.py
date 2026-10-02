@@ -27,12 +27,13 @@ def create_vehicle(vehicle_config: NissanConnect, vehicle: int):
             client = NissanClient(*current)
             configuration_key = current
         try:
-            battery = client.fetch_battery()
+            battery = client.fetch_battery(include_odometer=True)
         finally:
             # No account identifiers or secrets; battery values/times are still private.
             if isinstance(client.last_query, dict):
                 log.debug("Nissan vehicle %s query: %s", vehicle, json.dumps(client.last_query, sort_keys=True))
-        return CarState(soc=battery.soc, range=battery.range_km, soc_timestamp=battery.timestamp)
+        return CarState(soc=battery.soc, range=battery.range_km, soc_timestamp=battery.timestamp,
+                        odometer=battery.odometer_km)
 
     return ConfigurableVehicle(vehicle_config=vehicle_config, component_updater=updater,
                                vehicle=vehicle, calc_while_charging=False)

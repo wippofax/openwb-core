@@ -12,7 +12,7 @@ The JSON summary deliberately includes only these diagnostic fields:
 
 | Fields | Meaning |
 | --- | --- |
-| `outcome`, `phase` | Success, failure or deferred call; authentication, vehicle selection, battery or idle phase |
+| `outcome`, `phase` | Success, failure or deferred call; authentication, vehicle selection, battery, odometer or idle phase |
 | `request_started_at` | Start of the first actual HTTP transport attempt in this invocation; null if deferred |
 | `completed_at`, `duration_seconds` | Invocation completion time and monotonic elapsed duration |
 | `http_requests`, `last_http_status` | Attempt count and most recent response status, when available |
@@ -21,6 +21,9 @@ The JSON summary deliberately includes only these diagnostic fields:
 | `measurement_at`, `data_age_seconds` | Nissan's original measurement time and its age at completion, for a successful result |
 | `last_measurement_at` | Original measurement time from the most recent successful battery query |
 | `soc`, `range_km` | Battery percentage and optional range accepted by the client parser; null when the client has no valid result |
+| `odometer_km`, `odometer_outcome` | Optional total kilometres and success/unavailable/failed/deferred/not_requested status; overall success still means a valid battery result |
+| `odometer_http_status`, `odometer_retry_after_seconds` | Optional endpoint response status and its separate remaining pause |
+| `odometer_received_at` | Reception time for a valid odometer, not its unknown measurement time; null otherwise |
 | `retry_after_seconds` | Remaining client pause; zero when no pause applies |
 | `provider_retry_after_seconds` | Separate remaining provider advice; excludes the scheduled client's local error pause |
 | `source` | `nissan_cached_api`, identifying passive server data |
@@ -66,7 +69,7 @@ agent sessions without a separately considered disclosure decision.
 The Nissan page's **Test connection** button uses the currently entered username,
 password and optional VIN, including unsaved edits. It starts one passive battery
 query, including the login and selection requests it requires. The result shows
-SoC, optional range, query start, completion, original measurement time and data
+SoC, optional range/odometer, query start, completion, battery measurement time and battery data
 age. Times use the browser's local time zone. Age continues to increase while the
 result is visible. The result is cleared when the input changes or the component
 is closed. An in-flight request finishes so its original account's cooldown can
@@ -190,3 +193,27 @@ This is not a full Core regression or completed security/privacy review.
 Any wallbox change still requires an explicit warning and the owner's express
 approval. License/API terms and privacy checks remain open under the
 Bulletproof plan; the project remains open.
+
+## Color-theme refresh indicator in the pinned 2.2.3 Core
+
+Read-only source analysis at `3ced7f9cef3c70980ee1fab670f0d0717d1809ca`:
+`VehicleData.vue::loadSoc` and `CompactListItem.vue::loadSoc` set the local
+`waitingForSoc` flag after sending `force_soc_update`. The Colors message
+handler clears it only on `openWB/chargepoint/<id>/get/connected_vehicle/soc`.
+The Core changed-values publisher emits that composite object only when its
+contents change. A successful cached Nissan query can leave all its fields
+unchanged, including the original measurement timestamp. The spinner then
+persists even though the request has finished. Receiving the vehicle's own
+`get/soc` message does not clear that chargepoint flag. A rejected older
+measurement can produce the same lack of a changed composite message.
+
+The reset is therefore not strictly tied to a changed SoC percentage: a changed
+measurement timestamp, range, fault state or other composite field also causes
+a publication. The code has no timeout for `waitingForSoc`. Reloading the theme
+reinitializes its local flag; this does not refresh vehicle measurements.
+No real private request trace was inspected to prove which path occurred in
+one particular click. This is an identified theme behavior, not evidence of a
+still-running Nissan HTTP request. The module must not invent measurement times
+or publish unrelated chargepoint data to work around it. A separate theme issue
+can request completion/error handling and a bounded wait indicator. No theme or
+shared Core change is included in the odometer implementation.

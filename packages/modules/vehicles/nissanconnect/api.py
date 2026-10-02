@@ -1,11 +1,11 @@
-"""MyNISSAN EU/OneID client. Only cached battery data; no vehicle commands.
+"""MyNISSAN EU/OneID client. Cached battery/odometer data; no vehicle commands.
 
 Protocol adapted from HomeAssistant-NissanConnect; see NOTICE.md for attribution.
 Adapted for openWB by phelix, 2026-09-11 through 2026-10-02, under GPLv3.
 Credentials, cookies and tokens stay in memory. Never log transport payloads.
 """
 import base64
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 import hashlib
@@ -164,11 +164,15 @@ def _number(value, maximum=None):
 
 @dataclass(frozen=True)
 class BatteryStatus:
-    """SoC in percent, original Unix measurement time in seconds and optional km."""
+    """SoC and its Unix measurement time; optional range/odometer in km.
+
+    The battery timestamp does not describe the separate cockpit odometer.
+    """
 
     soc: float
     timestamp: float
     range_km: Optional[float] = None
+    odometer_km: Optional[float] = None
 
 
 def parse_battery(body, now=None):
@@ -196,6 +200,19 @@ def parse_battery(body, now=None):
         return BatteryStatus(soc, timestamp, distance)
     except (KeyError, TypeError, ValueError, AttributeError, OverflowError):
         raise NissanError("Nissan did not return a valid SoC with a measurement timestamp.") from None
+
+
+def parse_odometer(body):
+    """Read totalMileage in km; never substitute mileage, range or zero.
+
+    The reference OdometerSensor maps cockpit.totalMileage to kilometres. It
+    supplies no odometer measurement timestamp. Missing or invalid optional
+    data must not invalidate a successful battery measurement.
+    """
+    try:
+        return _number(body["data"]["attributes"]["totalMileage"])
+    except (KeyError, TypeError, NissanError):
+        return None
 
 
 class NissanClient:
@@ -232,6 +249,10 @@ class NissanClient:
         self._request_count = 0
         self._http_status = None
         self._phase = "idle"
+        self._odometer_retry_at = 0
+        self._odometer_outcome = "not_requested"
+        self._odometer_http_status = None
+        self._odometer_received_at = None
 
     def _request(self, method, url, auth_request=False, **kwargs):
         if _origin(url) not in {_origin(AUTH), _origin(BFF), _origin(USERS), _origin(CARS)}:
@@ -411,6 +432,40 @@ class NissanClient:
         else:
             raise NissanError("Could not select a unique vehicle. Please configure the VIN.")
 
+    def _optional_odometer(self):
+        """Try one passive GET after battery success, within the same budget.
+
+        Endpoint/auth/transport failures pause this optional endpoint for five
+        minutes without discarding SoC or retrying login. Explicit provider
+        pauses still govern subsequent queries, including battery queries.
+        Never reuse an old odometer as if it came from this response.
+        """
+        if self._clock() < self._odometer_retry_at:
+            self._odometer_outcome = "deferred"
+            return None
+        self._phase = "odometer"
+        self._http_status = None
+        try:
+            body = self._json("GET", CARS + "v1/cars/" + self._vin + "/cockpit", headers={
+                "Authorization": "Bearer " + self._access_token, "Content-Type": "application/vnd.api+json"})
+            value = parse_odometer(body)
+            self._odometer_outcome = "success" if value is not None else "unavailable"
+            if value is not None:
+                self._odometer_received_at = self._wall_clock()
+            return value
+        except NissanError as error:
+            self._odometer_outcome = "failed"
+            self._odometer_retry_at = self._clock() + 300
+            if isinstance(error, RateLimitError) or self._provider_retry_at > self._clock():
+                self._retry_error_type = type(error)
+                self._retry_reason = "Nissan requested a pause after the optional odometer query."
+            else:
+                # A cockpit-only outage must not suppress the next battery query.
+                self._retry_at = 0
+            return None
+        finally:
+            self._odometer_http_status = self._http_status
+
     def _finish_query(self, outcome, started, result=None):
         """Keep an allowlisted diagnostic summary, never raw transport data."""
         completed = self._wall_clock()
@@ -436,24 +491,34 @@ class NissanClient:
             "data_age_seconds": round(completed - result.timestamp, 1) if result else None,
             "soc": result.soc if result else None,
             "range_km": result.range_km if result else None,
+            "odometer_km": result.odometer_km if result else None,
+            "odometer_outcome": self._odometer_outcome,
+            "odometer_http_status": self._odometer_http_status,
+            "odometer_retry_after_seconds": max(0, math.ceil(self._odometer_retry_at - self._clock())),
+            "odometer_received_at": iso(self._odometer_received_at),
             "retry_after_seconds": max(0, math.ceil(self._retry_at - self._clock())),
             "provider_retry_after_seconds": max(0, math.ceil(self._provider_retry_at - self._clock())),
             "source": "nissan_cached_api",
         }
 
-    def fetch_battery(self):
+    def fetch_battery(self, include_odometer=False):
         """Return cached battery data or raise NissanError; never issue wake commands.
 
         Updates last_query with allowlisted diagnostics on success/failure and
         deferred calls. Failure pauses subsequent calls without sleeping. The
         60-second budget limits new request starts, not total socket read time.
         Core, not this client, decides whether to accept a measurement timestamp.
+        include_odometer adds one best-effort cockpit GET after battery success;
+        callers serving openWB and private tests enable it explicitly.
         """
         started = self._clock()
         self._request_started_at = None
         self._request_count = 0
         self._http_status = None
         self._phase = "idle"
+        self._odometer_outcome = "not_requested"
+        self._odometer_http_status = None
+        self._odometer_received_at = None
         if started < self._retry_at:
             remaining = math.ceil(self._retry_at - started)
             self._finish_query("deferred", started)
@@ -476,6 +541,8 @@ class NissanClient:
             self._provider_retry_at = 0
             self._retry_error_type = NissanError
             self._retry_reason = ""
+            if include_odometer:
+                result = replace(result, odometer_km=self._optional_odometer())
             outcome = "success"
             return result
         except NissanError as error:

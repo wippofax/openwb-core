@@ -45,7 +45,7 @@ def test_probe_uses_hidden_inputs_without_echo(monkeypatch, local_terminal, caps
     monkeypatch.setattr("builtins.input", lambda prompt: "y")
     monkeypatch.setattr(probe, "getpass", Mock(side_effect=["synthetic@example.invalid", "synthetic-password", ""]))
     client = Mock()
-    client.fetch_battery.return_value = BatteryStatus(47, 1640995200, 123)
+    client.fetch_battery.return_value = BatteryStatus(47, 1640995200, 123, 12345.6)
     factory = Mock(return_value=client)
     monkeypatch.setattr(probe, "NissanClient", factory)
     assert probe.main() == 0
@@ -53,7 +53,8 @@ def test_probe_uses_hidden_inputs_without_echo(monkeypatch, local_terminal, caps
     assert "synthetic@example.invalid" not in output
     assert "synthetic-password" not in output
     assert "SoC: 47 %" in output
-    client.fetch_battery.assert_called_once()
+    assert "Odometer: 12345.6 km (measurement time unavailable)" in output
+    client.fetch_battery.assert_called_once_with(include_odometer=True)
 
 
 def test_probe_aborts_if_hidden_input_is_unavailable(monkeypatch, local_terminal):

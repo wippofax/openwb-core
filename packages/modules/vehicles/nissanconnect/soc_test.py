@@ -28,14 +28,15 @@ def test_openwb_adapter_preserves_timestamp_reuses_client_and_handles_config_cha
     wrapper = Mock()
     monkeypatch.setattr(soc, "ConfigurableVehicle", wrapper)
     fake_client = Mock()
-    fake_client.fetch_battery.return_value = BatteryStatus(0, 1640995200, 0)
+    fake_client.fetch_battery.return_value = BatteryStatus(0, 1640995200, 0, 12345.6)
     factory = Mock(return_value=fake_client)
     monkeypatch.setattr(soc, "NissanClient", factory)
     config = NissanConnect(configuration=NissanConnectConfiguration("synthetic@example.invalid", "synthetic-password"))
     soc.create_vehicle(config, 7)
     updater = wrapper.call_args.kwargs["component_updater"]
     state = updater(None)
-    assert (state.soc, state.range, state.soc_timestamp) == (0, 0, 1640995200)
+    assert (state.soc, state.range, state.soc_timestamp, state.odometer) == (0, 0, 1640995200, 12345.6)
+    fake_client.fetch_battery.assert_called_once_with(include_odometer=True)
     updater(None)
     assert factory.call_count == 1
     config.configuration.password = "synthetic-new-password"
@@ -68,10 +69,10 @@ def test_configuration_roundtrip_uses_openwb_serializer():
 def test_module_logs_only_allowlisted_diagnostics(monkeypatch, soc_module, caplog):
     import json
     import logging
-    from modules.vehicles.nissanconnect.api_test import VIN, full_script, make_client
+    from modules.vehicles.nissanconnect.api_test import VIN, full_script, make_client, reply
     from modules.vehicles.nissanconnect.api import NissanError
 
-    client, transport, _ = make_client(full_script())
+    client, transport, _ = make_client(full_script() + [reply({"data": {"attributes": {"totalMileage": 12345.6}}})])
     wrapper = Mock()
     monkeypatch.setattr(soc_module, "ConfigurableVehicle", wrapper)
     monkeypatch.setattr(soc_module, "NissanClient", lambda *args: client)

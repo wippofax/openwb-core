@@ -150,3 +150,13 @@ Exact fetched SHA-256 digests, in addition to the immutable URLs above:
 
 Public source/license downloads were audit inputs only; no package was installed.
 Nissan pages are mutable and must be rechecked for the final service decision.
+
+## Odometer field provenance (2026-10-02)
+
+The same MIT-licensed HA revision supplies the additional field mapping:
+[OdometerSensor](https://github.com/dan-r/HomeAssistant-NissanConnect/blob/b0bafe9108d4574e243aa182324584dbc68369ad/custom_components/nissan_connect/sensor.py)
+uses `total_mileage` with kilometre units; its already-reviewed client maps that
+attribute from cockpit `totalMileage`. The new parser/transport/error policy
+are implemented locally, and the existing MIT notice remains applicable.
+No new package or license is introduced. Live Leaf availability and service
+access remain separate acceptance and terms questions.

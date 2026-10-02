@@ -104,7 +104,7 @@ These request pauses do not pause charging or override openWB's error counter.
 
 Regular module updates now log a selected DEBUG summary: actual HTTP attempt
 times, success/failure/deferment, Nissan measurement time, data age, SoC, optional
-range and retry delay. Credentials, VINs, tokens, URLs and raw responses are
+range, optional odometer and retry delays. Credentials, VINs, tokens, URLs and raw responses are
 excluded. Real battery values and times remain confidential.
 
 The matching settings page includes **Test connection**. It displays a passive
@@ -211,3 +211,36 @@ licenses and open service-access/distribution questions, and
 [contribution/source review](contribution-review.md) for the repository split
 and prepared reviewer summary. Software license compatibility does not establish
 permission to use the unofficial API client.
+
+## Optional odometer
+
+The scheduled module, unsaved connection test and private terminal probe now
+request stored odometer data after a valid battery response. The additional
+request is a GET to the existing car-adapter origin at `v1/cars/<vin>/cockpit`,
+using the same token and request budget; it sends no wake/refresh command.
+The referenced HomeAssistant-NissanConnect OdometerSensor uses `totalMileage`
+in kilometres. `mileage` and remaining range are deliberately not substitutes.
+
+A finite nonnegative number, including a real zero, is passed as
+`CarState.odometer`. Missing or invalid data is `None`, never an invented zero
+or a reused value from an earlier response. The existing store publishes it
+through the normal vehicle `get/odometer` topic. The pinned 2.2.3 status page,
+charge-log capture and CSV export already consume this field; no shared Core
+or status-page modification is needed. Core's normal battery timestamp guard
+still governs acceptance of the whole CarState, including its odometer.
+
+The cockpit response has no supported odometer measurement timestamp. Logs
+report reception time separately; the settings/probe output explicitly states
+the missing measurement time. Battery time and age describe the battery only.
+An unavailable odometer leaves the successful battery result usable. Endpoint
+errors pause only the optional endpoint for five minutes, without a second
+login attempt. HTTP 429 and explicit provider Retry-After advice still pause
+subsequent client requests. There is no immediate retry or extra scheduler.
+The additional GET uses the existing socket timeout of at most ten seconds and
+shares the battery query's 60-second request-start budget. A socket timeout is
+not a hard limit on the whole query's elapsed time.
+
+This extension is verified with synthetic responses only. Actual totalMileage
+availability/units for a particular Leaf still require a private comparison
+before accepting a new deployment. The previously frozen wallbox candidate is
+unchanged. See [diagnostics](diagnostics.md) and [privacy](privacy.md).

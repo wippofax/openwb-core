@@ -193,9 +193,12 @@ function nissan_test_record_result(array &$state, string $account, array $result
     if (($result['success'] ?? false) === true) {
         $soc = $query['soc'] ?? null;
         $range = $query['range_km'] ?? null;
+        $odometer = $query['odometer_km'] ?? null;
         $complete = ($query['outcome'] ?? '') === 'success' &&
             (is_int($soc) || is_float($soc)) && is_finite((float)$soc) && $soc >= 0 && $soc <= 100 &&
             ($range === null || ((is_int($range) || is_float($range)) && is_finite((float)$range) && $range >= 0));
+        $complete = $complete && ($odometer === null ||
+            ((is_int($odometer) || is_float($odometer)) && is_finite((float)$odometer) && $odometer >= 0));
         foreach (['request_started_at', 'completed_at', 'measurement_at'] as $field) {
             $complete = $complete && is_string($query[$field] ?? null) && strtotime($query[$field]) !== false;
         }

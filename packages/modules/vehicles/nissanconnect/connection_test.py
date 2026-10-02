@@ -33,7 +33,7 @@ def run_test(payload, client_factory=NissanClient):
     client = None
     try:
         client = client_factory(user.strip(), password, vin.strip().upper() if vin else None)
-        client.fetch_battery()
+        client.fetch_battery(include_odometer=True)
         return {"success": True, "code": "success", "query": client.last_query}
     except AuthenticationError:
         code = "authentication_failed"

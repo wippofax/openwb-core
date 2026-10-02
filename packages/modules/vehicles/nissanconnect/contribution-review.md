@@ -98,13 +98,14 @@ optional range and the original measurement timestamp through the existing
 vehicle wrapper. Its settings page offers an unsaved passive connection test
 with separate query and measurement times. It sends no wake or charge commands.
 
-The Python suite passes **102 tests** after correcting malformed destination
-and numeric-overflow error paths. The new cases also verify refresh-token
-rotation and no password-login retry on a refresh service outage. **52 PHP/
-platform tests remain skipped** pending the separately planned runtime setup;
-earlier PHP passes do not validate the new private-state hardening. The unchanged
-UI has prior 16-test/ESLint and pinned-build evidence. These are affected-area
-checks, not complete openWB regression or release validation.
+On 2026-10-02 the full affected module suite passed **142 tests** using
+Python 3.9.2 and an already present portable Windows PHP 7.4.33 interpreter.
+This includes the 102 Python cases and 40 portable PHP cases; both module-owned
+PHP files also pass syntax checking. No download or installation was needed.
+**12 Linux-only cases remain skipped**, including actual ownership/mode checks
+and the hardened HTTP contract. BP-SEC-01 remains open until those checks run.
+The unchanged UI has prior 16-test/ESLint and pinned-build evidence. These are
+affected-area checks, not complete openWB regression or release validation.
 
 A tester reports matching data in private account, unsaved settings and normal
 module queries, with overnight log/GUI activity. Precise automatic cadence,

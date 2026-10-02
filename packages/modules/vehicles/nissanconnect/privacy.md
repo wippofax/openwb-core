@@ -136,7 +136,8 @@ password at overall project completion and update the new value only privately.
   success, failures, deferred calls and redaction of module diagnostics.
 - `web/settings/modules/vehicles/nissanconnect/{test_connection,connection_test_lib}.php`:
   origin/input checks, subprocess flow, cooldown persistence and filesystem
-  source review. Runtime checks of the latest hardening remain deferred.
+  source review. Windows PHP 7.4.33 now passes the portable checks; actual
+  Linux ownership/mode and hardened HTTP checks remain deferred.
 - UI `vehicle.vue`, its integration tests and pinned preparation script:
   in-memory input/results, account switching, fixed errors, ignored late results
   and removal of the three known payload-bearing console statements.

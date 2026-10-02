@@ -177,12 +177,14 @@ automatic cadence, charging with this SoC module, sustained token renewal and
 saved-settings removal still need their own acceptance evidence.
 
 The private-state hardening and its additional tests are local source changes
-after the frozen pre-Bulletproof candidate. They have not been deployed or
-validated by PHP yet. Installation of a local PHP test runtime is deferred at
-the owner's request until an unmetered network is available. Linux ownership
-and full endpoint tests must additionally run in a Linux environment; Windows
-PHP covers syntax, pure metadata predicates and the other portable helpers.
-Earlier endpoint/PHP passes do not validate the new hardening.
+after the frozen pre-Bulletproof candidate and have not been deployed. On
+2026-10-02, the existing portable Windows PHP 7.4.33 interpreter was located
+outside PATH; no download or installation was necessary. Both PHP files pass
+syntax checks. The full affected module suite passes 142 tests (102 Python and
+40 portable PHP cases), with 12 Linux-only cases skipped. Actual Linux
+ownership/mode behavior and the complete hardened HTTP contract remain
+unverified, so BP-SEC-01 stays open. Windows metadata-predicate checks alone
+cannot establish Unix filesystem behavior. No production service was accessed.
 
 This is not a full Core regression or completed security/privacy review.
 Any wallbox change still requires an explicit warning and the owner's express

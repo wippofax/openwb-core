@@ -117,8 +117,10 @@ state file with expiry times, a random local HMAC key and keyed digests of
 normalized account names. It contains no raw username, password, VIN or vehicle
 response. The digests remain account-related: a party holding the state and
 its key can check candidate account names against them, so keep this state
-private too. Expired account entries are removed when state is next loaded. Failure
-to persist state prevents a query. The browser retains account countdowns only
+private too. Expired account entries are pruned in memory when state is loaded;
+the next successful state write persists that pruning. An early cooldown/error
+return can leave expired records on disk. There is no five-minute file-deletion
+timer. Failure to persist state prevents a query. The browser retains account countdowns only
 in component memory; after a reload or in another tab, the server remains
 authoritative and reports any applicable delay when a test is requested.
 

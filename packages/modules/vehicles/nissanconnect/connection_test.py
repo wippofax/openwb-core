@@ -13,6 +13,11 @@ else:
 
 
 def run_test(payload, client_factory=NissanClient):
+    """Validate one unsaved test and return diagnostics or a fixed public error code.
+
+    No MQTT/configuration writes. PHP owns cross-request locking and cooldowns;
+    this short-lived worker does not share scheduled-client tokens or backoff.
+    """
     if not isinstance(payload, dict) or set(payload) - {"user_id", "password", "vin"}:
         return {"success": False, "code": "invalid_input"}
     user = payload.get("user_id")

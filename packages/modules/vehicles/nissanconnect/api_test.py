@@ -375,3 +375,62 @@ def test_timeout_pauses_requests_without_retaining_exception_traceback():
     assert not any(isinstance(value, BaseException) for value in vars(client).values())
     ticks[0] = 300
     assert client.fetch_battery().soc == 47
+
+
+def test_unrepresentable_optional_range_preserves_valid_soc():
+    result = parse_battery(battery(rangeHvacOn=10 ** 400), now=MEASURED)
+    assert (result.soc, result.timestamp, result.range_km) == (47, MEASURED, None)
+
+
+def test_unrepresentable_token_lifetime_is_safe_and_pauses_retry():
+    script = login_script()
+    script[-1] = reply({"access_token": "synthetic-private-access", "expires_in": 10 ** 400})
+    client, transport, _ = make_client(script)
+    with pytest.raises(AuthenticationError, match="token lifetime") as error:
+        client.fetch_battery()
+    assert "synthetic-private-access" not in str(error.value)
+    assert client._access_token is None and client._refresh_token is None
+    count = len(transport.calls)
+    with pytest.raises(AuthenticationError, match="paused"):
+        client.fetch_battery()
+    assert len(transport.calls) == count
+
+
+@pytest.mark.parametrize("during_form", [False, True])
+def test_malformed_login_destination_is_safe_and_pauses_retry(during_form):
+    private_url = "https://[synthetic-private-host"
+    response = reply(FORM.replace("/commonauth", private_url)) if during_form else reply(
+        "", 302, {"Location": private_url})
+    client, transport, _ = make_client([response])
+    with pytest.raises(NissanError) as error:
+        client.fetch_battery()
+    assert "synthetic-private-host" not in str(error.value)
+    with pytest.raises(NissanError, match="paused"):
+        client.fetch_battery()
+    assert len(transport.calls) == 1
+
+
+def test_rotated_refresh_token_is_used_on_next_expiry():
+    client, transport, ticks = make_client(full_script() + [
+        reply({"access_token": "synthetic-next-access", "refresh_token": "synthetic-next-refresh"}),
+        reply(battery()), reply({"access_token": "synthetic-final-access"}), reply(battery())])
+    client.fetch_battery()
+    ticks[0] = 3600
+    client.fetch_battery()
+    ticks[0] = 7200
+    client.fetch_battery()
+    assert transport.calls[-2][2]["headers"]["Authorization"] == "synthetic-next-refresh"
+    assert transport.calls[-1][2]["headers"]["Authorization"] == "Bearer synthetic-final-access"
+
+
+def test_refresh_service_failure_does_not_fall_back_to_password_login():
+    client, transport, ticks = make_client(full_script() + [reply("synthetic-private-body", 503)])
+    client.fetch_battery()
+    ticks[0] = 3600
+    with pytest.raises(NissanError):
+        client.fetch_battery()
+    assert len(transport.calls) == 8
+    assert "refresh-token" in transport.calls[-1][1]
+    with pytest.raises(NissanError, match="paused"):
+        client.fetch_battery()
+    assert len(transport.calls) == 8

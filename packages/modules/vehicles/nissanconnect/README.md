@@ -56,6 +56,11 @@ Ambiguous selection or an unknown VIN produces an error.
 
 ## Data flow and secrets
 
+See [privacy and diagnostic data](privacy.md) for the reviewed configuration,
+MQTT, logging, backup and removal paths, including an unresolved inherited
+Core log-redaction limitation. Saved credentials are normal openWB
+configuration; same-origin testing does not encrypt an HTTP connection.
+
 When run, the module communicates directly with the configured Nissan and
 Kamereon HTTPS endpoints. No model provider is involved in client operation.
 This code produces no telemetry and does not store API responses, cookies or
@@ -200,4 +205,7 @@ References:
 - [NissanConnect reference at the recorded revision](https://github.com/dan-r/HomeAssistant-NissanConnect/tree/b0bafe9108d4574e243aa182324584dbc68369ad)
 - [OneID migration](https://github.com/dan-r/HomeAssistant-NissanConnect/pull/119)
 
-See `NOTICE.md` for license information for the reference implementation.
+See `NOTICE.md` for the recorded reference attribution and
+[contribution/source review](contribution-review.md) for the repository split,
+dependency inventory, prepared reviewer summary and remaining license/terms
+checks. This inventory does not establish service access permission.

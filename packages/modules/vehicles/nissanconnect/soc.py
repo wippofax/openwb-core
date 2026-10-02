@@ -1,3 +1,4 @@
+"""Adapt Nissan measurements to the existing openWB vehicle wrapper and scheduler."""
 import json
 import logging
 
@@ -13,6 +14,7 @@ log = logging.getLogger(__name__)
 
 
 def create_vehicle(vehicle_config: NissanConnect, vehicle: int):
+    """Keep one client per configuration; delegate scheduling/error policy to Core."""
     client = None
     configuration_key = None
 
@@ -27,7 +29,7 @@ def create_vehicle(vehicle_config: NissanConnect, vehicle: int):
         try:
             battery = client.fetch_battery()
         finally:
-            # Contains only explicit diagnostics and battery values, never account data.
+            # No account identifiers or secrets; battery values/times are still private.
             if isinstance(client.last_query, dict):
                 log.debug("Nissan vehicle %s query: %s", vehicle, json.dumps(client.last_query, sort_keys=True))
         return CarState(soc=battery.soc, range=battery.range_km, soc_timestamp=battery.timestamp)

@@ -64,6 +64,8 @@ class PrivateTransport:
     openWB's standard requests hook logs complete authentication responses. urllib
     avoids that hook and urllib3's debug logging of URLs containing VINs/codes.
     CookieJar is memory-only; no cookie or token cache is written to disk.
+    urllib may inherit system/environment proxies; TLS still uses the local
+    trust store. This transport is not an independent network sandbox.
     """
 
     def __init__(self):
@@ -150,6 +152,10 @@ def _object(response):
 def _number(value, maximum=None):
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise NissanError("Nissan returned an invalid battery value.")
+    try:
+        value = float(value)
+    except OverflowError:
+        raise NissanError("Nissan returned an invalid battery value.") from None
     if not math.isfinite(value) or value < 0 or (maximum is not None and value > maximum):
         raise NissanError("Nissan returned an invalid battery value.")
     return float(value)
@@ -157,6 +163,8 @@ def _number(value, maximum=None):
 
 @dataclass(frozen=True)
 class BatteryStatus:
+    """SoC in percent, original Unix measurement time in seconds and optional km."""
+
     soc: float
     timestamp: float
     range_km: Optional[float] = None
@@ -190,6 +198,13 @@ def parse_battery(body, now=None):
 
 
 class NissanClient:
+    """Stateful client for one account/vehicle; callers must serialize its use.
+
+    Keeps tokens, vehicle selection and backoff in memory between queries.
+    Create a new instance when credentials/VIN change. The injected transport
+    and clocks support synthetic tests; production requests use PrivateTransport.
+    """
+
     def __init__(self, user_id, password, vin=None, transport=None, clock=time.monotonic, wall_clock=time.time):
         self._user = user_id
         self._password = password
@@ -271,8 +286,11 @@ class NissanClient:
             location = next((v for k, v in response.headers.items() if k.lower() == "location"), None)
             if not isinstance(location, str) or not location:
                 break
-            target = urljoin(url, location)
-            parsed = urlsplit(target)
+            try:
+                target = urljoin(url, location)
+                parsed = urlsplit(target)
+            except ValueError:
+                raise NissanError("Unexpected redirect during Nissan login.") from None
             expected = urlsplit(CALLBACK)
             if callback and (parsed.scheme, parsed.netloc, parsed.path) == (
                     expected.scheme, expected.netloc, expected.path) and not parsed.fragment:
@@ -303,7 +321,10 @@ class NissanClient:
         form = _LoginForm.parse(response.body)
         if not form or not form["action"]:
             raise NissanError("Nissan login form is unavailable; you may need to sign in through the app.")
-        target = urljoin(url, form["action"])
+        try:
+            target = urljoin(url, form["action"])
+        except ValueError:
+            raise NissanError("Unexpected Nissan login form destination.") from None
         if _origin(target) != _origin(AUTH):
             raise NissanError("Unexpected Nissan login form destination.")
         data = dict(form["inputs"])
@@ -337,7 +358,7 @@ class NissanClient:
             expires = float(token.get("expires_in", 3600))
             if not math.isfinite(expires) or expires <= 0:
                 raise ValueError
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, OverflowError):
             raise AuthenticationError("Nissan returned an invalid token lifetime.") from None
         self._access_token = access
         self._refresh_token = refresh or self._refresh_token
@@ -420,6 +441,13 @@ class NissanClient:
         }
 
     def fetch_battery(self):
+        """Return cached battery data or raise NissanError; never issue wake commands.
+
+        Updates last_query with allowlisted diagnostics on success/failure and
+        deferred calls. Failure pauses subsequent calls without sleeping. The
+        60-second budget limits new request starts, not total socket read time.
+        Core, not this client, decides whether to accept a measurement timestamp.
+        """
         started = self._clock()
         self._request_started_at = None
         self._request_count = 0

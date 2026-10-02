@@ -18,7 +18,8 @@ import pytest
 PHP = os.environ.get('NISSAN_TEST_PHP') or shutil.which('php')
 
 
-@pytest.mark.skipif(not PHP, reason='PHP CLI is needed for loopback endpoint checks')
+@pytest.mark.skipif(not PHP or sys.platform != 'linux',
+                    reason='PHP on Linux is needed for endpoint ownership and loopback checks')
 def test_complete_php_http_contract_with_synthetic_worker(tmp_path):
     # The child does not inherit pytest's network hooks. It explicitly permits
     # only loopback HTTP and starts no Nissan client or openWB service.

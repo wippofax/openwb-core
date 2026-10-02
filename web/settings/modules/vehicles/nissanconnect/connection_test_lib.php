@@ -70,6 +70,87 @@ function nissan_test_run_worker(array $command, string $body, float $timeout = 7
     return $result;
 }
 
+function nissan_test_effective_uid(): ?int {
+    // Linux deployment; do not mistake a Windows stat UID for an ACL check.
+    if (PHP_OS_FAMILY !== 'Linux') { return null; }
+    if (function_exists('posix_geteuid')) { return posix_geteuid(); }
+    // POSIX is optional in PHP. Read only this process's bounded UID record.
+    $status = @file_get_contents('/proc/self/status', false, null, 0, 16384);
+    if (!is_string($status) ||
+        preg_match('/^Uid:[ \t]+[0-9]+[ \t]+([0-9]+)[ \t]+[0-9]+[ \t]+([0-9]+)[ \t]*$/m',
+            $status, $match) !== 1 || $match[1] !== $match[2]) {
+        return null;
+    }
+    return (int)$match[1];
+}
+
+function nissan_test_private_stat($stat, int $uid, bool $directory): bool {
+    return is_array($stat) && ($stat['uid'] ?? null) === $uid &&
+        (($stat['mode'] ?? 0) & 0170000) === ($directory ? 0040000 : 0100000) &&
+        (($stat['mode'] ?? 0) & 07777) === ($directory ? 0700 : 0600) &&
+        ($directory || ($stat['nlink'] ?? 0) === 1);
+}
+
+function nissan_test_same_file($left, $right): bool {
+    return is_array($left) && is_array($right) &&
+        isset($left['dev'], $left['ino'], $right['dev'], $right['ino']) &&
+        $left['dev'] === $right['dev'] && $left['ino'] === $right['ino'];
+}
+
+function nissan_test_open_state(string $directory) {
+    $uid = nissan_test_effective_uid();
+    if ($uid === null) { return false; }
+    $parent = dirname($directory);
+    clearstatcache(true, $parent);
+    $parentStat = @lstat($parent);
+    // A writable shared parent needs sticky-directory protection. Do not trust
+    // a parent owned by another unprivileged user, even when its mode looks safe.
+    if (!is_array($parentStat) || (($parentStat['mode'] ?? 0) & 0170000) !== 0040000 ||
+        !in_array($parentStat['uid'] ?? null, [0, $uid], true) ||
+        (($parentStat['mode'] & 0022) !== 0 && ($parentStat['mode'] & 01000) === 0)) {
+        return false;
+    }
+    $previousMask = umask(0077);
+    try {
+        clearstatcache(true, $directory);
+        $beforeDirectory = @lstat($directory);
+        if ($beforeDirectory === false) {
+            // Another legitimate request may win creation; validate its result.
+            @mkdir($directory, 0700);
+            clearstatcache(true, $directory);
+            $beforeDirectory = @lstat($directory);
+        }
+        if (!nissan_test_private_stat($beforeDirectory, $uid, true)) { return false; }
+        $path = $directory . '/state';
+        clearstatcache(true, $path);
+        $beforeFile = @lstat($path);
+        if ($beforeFile !== false && !nissan_test_private_stat($beforeFile, $uid, false)) {
+            return false;
+        }
+        // Exclusive creation does not follow an existing link. Reopening never
+        // truncates: inspect the opened descriptor before reading or writing.
+        $file = @fopen($path, $beforeFile === false ? 'x+b' : 'r+b');
+        if ($file === false) { return false; }
+        $opened = fstat($file);
+        clearstatcache(true, $path);
+        $afterFile = @lstat($path);
+        clearstatcache(true, $directory);
+        $afterDirectory = @lstat($directory);
+        if (!nissan_test_private_stat($opened, $uid, false) ||
+            !nissan_test_private_stat($afterFile, $uid, false) ||
+            !nissan_test_private_stat($afterDirectory, $uid, true) ||
+            !nissan_test_same_file($beforeDirectory, $afterDirectory) ||
+            !nissan_test_same_file($opened, $afterFile) ||
+            ($beforeFile !== false && !nissan_test_same_file($beforeFile, $opened))) {
+            fclose($file);
+            return false;
+        }
+        return $file;
+    } finally {
+        umask($previousMask);
+    }
+}
+
 function nissan_test_load_state($lock, int $now): ?array {
     rewind($lock);
     $raw = stream_get_contents($lock, 131073);

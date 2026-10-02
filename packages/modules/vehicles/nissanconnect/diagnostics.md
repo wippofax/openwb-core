@@ -20,7 +20,7 @@ The JSON summary deliberately includes only these diagnostic fields:
 | `last_success_at` | Most recent successful battery query, preserved after failure |
 | `measurement_at`, `data_age_seconds` | Nissan's original measurement time and its age at completion, for a successful result |
 | `last_measurement_at` | Original measurement time from the most recent successful battery query |
-| `soc`, `range_km` | Returned battery percentage and optional range; null when no result is accepted |
+| `soc`, `range_km` | Battery percentage and optional range accepted by the client parser; null when the client has no valid result |
 | `retry_after_seconds` | Remaining client pause; zero when no pause applies |
 | `provider_retry_after_seconds` | Separate remaining provider advice; excludes the scheduled client's local error pause |
 | `source` | `nissan_cached_api`, identifying passive server data |
@@ -35,6 +35,26 @@ repeat every login request.
 These logs describe Nissan retrieval, not the SoC subsequently calculated by the
 shared openWB wrapper. They do not change scheduler timestamps, fallback, error
 counters or charging policy. See [error handling](error-handling.md).
+
+In the pinned 2.2.3 Core, the Status card displays `soc_timestamp`, which this
+module sets to Nissan's measurement time. It is independent of percentage
+changes. Core's `soc_request_timestamp` records an updater attempt before it
+runs; it does not itself prove that an HTTP request was sent. Use
+`request_started_at` and `measurement_at` to distinguish the two times.
+
+The module emits `outcome=success` before the shared wrapper decides whether
+to store the returned value. That wrapper rejects a measurement more than
+60 seconds older than the previously stored one and logs
+`Not updating SoC, because timestamp is older.` at DEBUG. A recent manual
+entry can therefore remain displayed after a successful cached Nissan query.
+The module deliberately preserves the real measurement time.
+
+Saving a different module does not force an immediate first query or reset the
+vehicle's existing request timestamp. Normal scheduling applies the currently
+saved interval to that timestamp; reducing the interval does not retain a
+separate timer for the old interval. A normal manual refresh bypasses the
+scheduler interval, while client retry delays and the timestamp guard still
+apply. These mechanisms do not prove the cause of any particular past trial.
 
 Username, password, VIN, tokens, cookies, URLs, raw bodies and transport exception
 messages are excluded. Battery values and times can still reveal vehicle usage:
@@ -95,10 +115,24 @@ The scheduled SoC client's existing error backoff is unchanged and independent.
 The private temporary directory `openwb-nissanconnect-test` stores a bounded
 state file with expiry times, a random local HMAC key and keyed digests of
 normalized account names. It contains no raw username, password, VIN or vehicle
-response. Expired account entries are removed when state is next loaded. Failure
+response. The digests remain account-related: a party holding the state and
+its key can check candidate account names against them, so keep this state
+private too. Expired account entries are removed when state is next loaded. Failure
 to persist state prevents a query. The browser retains account countdowns only
 in component memory; after a reload or in another tab, the server remains
 authoritative and reports any applicable delay when a test is requested.
+
+The hardened endpoint validates the Linux process UID, a trusted temporary
+parent, a real 0700 directory and a regular 0600 state file owned by that UID.
+It rejects symlinks, multiply linked files and unsafe existing permissions.
+Exclusive creation and descriptor/path identity checks happen before state is
+read or written. Reopening does not truncate an unverified file; permissions
+are never silently repaired and rejected paths are not removed. Competing
+first-time creation can return unavailable safely; no Nissan query is started.
+The boundary excludes a hostile root process or another process with the same
+UID. A missing POSIX extension uses the bounded Linux `/proc/self/status` UID
+record; there is no new package dependency. Windows ACLs are not inferred from
+Unix-style stat values, and production endpoint use is limited to Linux.
 
 The worker has a 60-second request-start budget and per-socket limits. The PHP
 parent terminates a still-running worker after 70 seconds; the browser abandons
@@ -108,7 +142,8 @@ part of the pending device validation.
 
 ## Offline evidence and remaining work
 
-The exact Core target `3ced7f9ce` passed 122 synthetic module/PHP tests under
+Before the 2026-10-02 private-state hardening, the exact Core target
+`3ced7f9ce` passed 122 synthetic module/PHP tests under
 Python 3.9.2 on Windows. The preceding 11 native-interface checks remain valid;
 the adapter and shared interfaces were not changed in this extension. PHP helper
 checks ran with PHP 7.4.33 and cover origin/input checks, subprocess limits,
@@ -132,8 +167,22 @@ The isolated browser preview offers selectable synthetic success/error scenarios
 including provider delay and a real 75-second wait; its reset clears only demo
 state. No real account or wallbox was used.
 
-This is not an Apache deployment or full Core regression. Target Linux/ARM
-execution, its Python installation, web-server permissions and live authentication
-remain to be verified under a separately approved device test plan. Any wallbox
-change requires an explicit warning and the owner's express approval. License/API
-terms review is deferred to the agreed later step; the project is not complete.
+The owner subsequently reported an Apache/PHP/Python runtime check, candidate
+installation, an unsaved settings connection test, a regular module query and
+unsaved-test removal on the wallbox. The displayed battery data matched the
+official app. Overnight logs and GUI changes are also reported; precise
+automatic cadence, charging with this SoC module, sustained token renewal and
+saved-settings removal still need their own acceptance evidence.
+
+The private-state hardening and its additional tests are local source changes
+after the frozen pre-Bulletproof candidate. They have not been deployed or
+validated by PHP yet. Installation of a local PHP test runtime is deferred at
+the owner's request until an unmetered network is available. Linux ownership
+and full endpoint tests must additionally run in a Linux environment; Windows
+PHP covers syntax, pure metadata predicates and the other portable helpers.
+Earlier endpoint/PHP passes do not validate the new hardening.
+
+This is not a full Core regression or completed security/privacy review.
+Any wallbox change still requires an explicit warning and the owner's express
+approval. License/API terms and privacy checks remain open under the
+Bulletproof plan; the project remains open.

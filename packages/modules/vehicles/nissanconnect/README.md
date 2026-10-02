@@ -14,14 +14,22 @@ query intervals, errors and charge limits.
 - This is an unofficial interface derived from public implementations. Nissan
   may change the login flow or data formats. Additional login steps, consent
   and MFA are not automated; complete them in the official app if required.
-- **One successful manual account query has been reported by a tester:** the
-  returned data matched the official Nissan app. Only the qualitative result
-  was shared; it was not independently verified. Sustained token renewal,
-  other account configurations and wallbox integration remain untested live.
+- **A tester has reported successful private account and wallbox tests:**
+  installation, an unsaved settings connection test and a normal module query
+  returned data matching the official app. Overnight logs and GUI changes were
+  also reported. These are qualitative reports, not independently inspected
+  private data. Exact automatic cadence, sustained token renewal, other account
+  configurations, charging with the module's SoC and saved-settings removal
+  remain open acceptance items.
 - Only cached server data is read. No wakeup, `refresh-battery-status` or vehicle
   charging start/stop commands are sent. If Nissan's data is old, the reported
   SoC may also be old. The original timestamp is preserved so openWB can use
   its existing calculation.
+- Status shows the stored SoC measurement time, not the last HTTP request time.
+  A new request can return the same measurement without changing that display.
+  An API success also does not guarantee that Core accepts the value: the
+  pinned 2.2.3 wrapper rejects measurements more than 60 seconds older than the
+  stored SoC, which can matter after switching from a recent manual value.
 - A missing or invalid SoC, or a measurement timestamp that is missing, has no
   time zone or is more than five minutes in the future, produces an error.
   A missing optional range does not invalidate an otherwise valid SoC.
@@ -106,6 +114,10 @@ the private cooldown metadata, access assumptions and testing limits.
 Use synthetic fixtures only. Optional PHP helper tests need `php` on PATH or
 `NISSAN_TEST_PHP` pointing to a PHP CLI executable; otherwise those tests are
 explicitly skipped. Their subprocesses use fixed synthetic programs only.
+The state metadata predicates can be tested with PHP on Windows. Actual
+ownership/mode checks and the hardened endpoint's loopback contract require
+Linux; they are explicitly skipped on other platforms. The endpoint fails
+closed outside Linux rather than treating Windows stat fields as ACL evidence.
 The Python unit tests block socket connections, name resolution
 and real vehicle queries through the replaced transport. The adapter test
 replaces the service wrapper and verifies the values passed to the real

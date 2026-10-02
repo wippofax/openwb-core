@@ -29,19 +29,8 @@ if ($body === false || strlen($body) > 8192 || !nissan_test_valid_input(json_dec
 // Inherit the settings web server's access policy. Same-origin checks block browser
 // cross-site submissions; they are not a replacement for installation access control.
 // A private file holds expiry times and keyed account digests, never raw account data.
-$previousMask = umask(0077);
 $directory = sys_get_temp_dir() . '/openwb-nissanconnect-test';
-if ((!is_dir($directory) && !@mkdir($directory, 0700)) || is_link($directory)) {
-    umask($previousMask);
-    nissan_test_reply(503, ['success' => false, 'code' => 'unavailable']);
-}
-$path = $directory . '/state';
-if (is_link($path)) {
-    umask($previousMask);
-    nissan_test_reply(503, ['success' => false, 'code' => 'unavailable']);
-}
-$lock = @fopen($path, 'c+');
-umask($previousMask);
+$lock = nissan_test_open_state($directory);
 if (!$lock) {
     nissan_test_reply(503, ['success' => false, 'code' => 'unavailable']);
 }

@@ -81,7 +81,9 @@ retains its normal behavior. A success proves retrieval of valid stored battery
 data, not that the vehicle is awake or that the data was measured just now.
 
 The UI posts JSON to the module-owned endpoint
-`web/settings/modules/vehicles/nissanconnect/test_connection.php`. Its helper
+`web/settings/modules/vehicles/nissanconnect/test_connection.php`. The settings
+repository owns its sources in `public/modules/vehicles/nissanconnect/` and
+delivers both PHP files through the regular UI build. Its helper
 `connection_test_lib.php` requires PHP 7.4 or newer with `proc_open`; deployment
 expects Linux and `/usr/bin/python3` with Python 3.9 or newer. The worker is
 `packages/modules/vehicles/nissanconnect/connection_test.py`. All three backend

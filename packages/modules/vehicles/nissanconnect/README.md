@@ -119,13 +119,16 @@ excluded. Real battery values and times remain confidential.
 The matching settings page includes **Test connection**. It displays a passive
 query's battery values and separate query/measurement times using the current
 form values, without saving settings or updating charging control. It requires
-the module-owned PHP endpoint as well as the Python module and matching UI build.
+the Python module and a matching settings build, which includes the PHP
+endpoint from the settings repository's `public/modules/vehicles/nissanconnect/`.
 See [diagnostics and connection-test behavior](diagnostics.md) for log fields,
 the private cooldown metadata, access assumptions and testing limits.
 
 ## Offline validation
 
-Use synthetic fixtures only. Optional PHP helper tests need `php` on PATH or
+Use synthetic fixtures only. The PHP tests now live in the settings repository
+under `tests/nissanconnect/`, alongside the endpoint sources owned there.
+Optional PHP helper tests need `php` on PATH or
 `NISSAN_TEST_PHP` pointing to a PHP CLI executable; otherwise those tests are
 explicitly skipped. Their subprocesses use fixed synthetic programs only.
 The state metadata predicates can be tested with PHP on Windows. Actual
@@ -152,9 +155,11 @@ PYTHONPATH=packages python -m pytest -q packages/modules/vehicles/nissanconnect 
 python -m flake8 packages/modules/vehicles/nissanconnect
 ```
 
-For the UI in its separate repository:
+For the UI and PHP endpoint in the settings repository (Python with pytest
+and PHP are test prerequisites, not new vehicle-module dependencies):
 
 ```sh
+python -m pytest -q tests/nissanconnect
 npm ci --ignore-scripts
 npx eslint src/components/vehicles/nissanconnect
 npx vitest run src/components/vehicles/nissanconnect/vehicle.spec.js

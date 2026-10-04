@@ -11,17 +11,19 @@ bundle notices and final privacy review remain open.
 
 | Repository | Proposed content | Scope retained |
 | --- | --- | --- |
-| `openWB/core` | `packages/modules/vehicles/nissanconnect/` and the two module-owned PHP files in `web/settings/modules/vehicles/nissanconnect/` | Native configuration factory, `DeviceDescriptor`, `ConfigurableVehicle` and `CarState`; no shared scheduler/controller, MQTT, log-filter or recovery changes |
-| `openWB/openwb-ui-settings` | Nissan Vue component and synthetic tests; the existing minimal console-payload removals need explicit explanation in review | Existing module selection, configuration store/save path and form components; no new UI dependency |
+| `openWB/core` | `packages/modules/vehicles/nissanconnect/`, including the stdin-only connection-test worker | Native configuration factory, `DeviceDescriptor`, `ConfigurableVehicle` and `CarState`; no shared scheduler/controller, MQTT, log-filter or recovery changes |
+| `openWB/openwb-ui-settings` | Nissan Vue component, PHP endpoints in `public/modules/vehicles/nissanconnect/`, and their synthetic tests; the minimal console-payload removals remain explicitly explained | Existing module selection, configuration store/save path and form components; no new UI dependency |
 | Local project records | Candidate manifest, installation/recovery tools, acceptance and Bulletproof findings | Outside these product contributions unless maintainers explicitly request them |
 
 Use the upstream branches and submission instructions current at contribution
 time. The recorded targets are Core `master` and settings `main`; the 2.2.3
 compatibility build is a separate pinned test artifact. Cross-reference the
 two changes so maintainers can review endpoint and UI together. Do not commit
-the locally compiled settings assets in the Core source contribution. Check
-upstream expectations for the two PHP files before submitting; they must survive
-the chosen UI build/deployment process.
+the locally compiled settings assets in the Core source contribution. The two
+PHP sources now belong to the settings repository and are copied unchanged
+from `public/` by its regular build, like the existing BMW/Porsche endpoints.
+Their tests live in `tests/nissanconnect/` there; CI checks both PHP behavior
+and the built files. The deployed URL and fixed Core worker path are unchanged.
 
 The existing pinned preparation script also removes payload values from three
 debug statements in `App.vue`, `ComponentState.vue` and

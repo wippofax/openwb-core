@@ -136,7 +136,8 @@ password at overall project completion and update the new value only privately.
 - `api.py`, `soc.py`, `config.py`, `connection_test.py`, `probe.py`: module data
   handling, token reuse/renewal, fixed errors and logging; synthetic tests cover
   success, failures, deferred calls and redaction of module diagnostics.
-- `web/settings/modules/vehicles/nissanconnect/{test_connection,connection_test_lib}.php`:
+- Settings repository `public/modules/vehicles/nissanconnect/{test_connection,connection_test_lib}.php`
+  (deployed under Core `web/settings/modules/vehicles/nissanconnect/`):
   origin/input checks, subprocess flow, cooldown persistence and filesystem
   source review. Windows PHP 7.4.33 passes the portable checks. Linux PHP 8.4.26
   passes 57 endpoint/state cases with one expected non-Linux skip, including

@@ -1,5 +1,7 @@
 # Privacy and diagnostic data
 
+For the short user-facing version, see [Before using MyNISSAN EU](user-information.md).
+
 Technical source review, 2026-10-02. This describes the module and the inherited
 openWB data paths; it is not a legal compliance assessment or an inspection of
 an installation. All checks used public source and invented test values.
@@ -7,9 +9,9 @@ an installation. All checks used public source and invented test values.
 The review starts from module commit `9b4ea4d`, settings commit `776a60d`,
 Core target `3ced7f9cef3c70980ee1fab670f0d0717d1809ca` and settings target
 `e8de268fa25f7efca2b5ffc005a757a2f36b530f`. Module changes accompanying this
-document address the malformed-response findings below. The deployed candidate
-predates this review. Target references describe that version, not all openWB
-releases or the effective configuration of any particular wallbox.
+document address the malformed-response findings below. These references
+identify the initial review baseline. Target references describe that version,
+not all openWB releases or the effective configuration of any particular wallbox.
 
 ## Information flows
 
@@ -92,8 +94,9 @@ not change backend logging.
 Fixing shared log redaction requires separate Core scope and maintainer review.
 This module must not install a global log filter or modify shared MQTT behavior
 to hide the issue. Keep logs private and use Details only for a bounded test.
-Do not weaken a password to accommodate a log parser. Publication readiness
-still needs an explicit disposition for this inherited finding.
+Do not weaken a password to accommodate a log parser. This remains an unresolved
+inherited finding for maintainer review. The
+user notice now explains the exposure; that disclosure is not a Core fix.
 
 ## Retention, backups and removal
 
@@ -112,8 +115,9 @@ modes, file type/link count and descriptor/path identity. It refuses unsafe
 existing state without deleting it or repairing permissions. **BP-SEC-01 is
 corrected and locally verified**: all 12 previously skipped Linux cases pass
 in WSL2/Debian 13 as an ordinary user, including the synthetic HTTP contract.
-These new checks are not deployed; ARM/Apache acceptance remains separate. Root
-and other code running as the same UID remain outside the isolation boundary.
+These are Linux x86_64 test results; installation-specific ARM/Apache evidence
+remains separate. Root and other code running as the same UID remain outside
+the isolation boundary.
 
 The pinned `runs/backup.sh` copies both MQTT databases and broker configuration
 into the normal backup, together with histories and other configuration. It

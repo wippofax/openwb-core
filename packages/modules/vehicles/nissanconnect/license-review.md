@@ -12,6 +12,15 @@ permission for the unofficial service client. Final distribution packaging
 and the service-access question below remain open. This is a documented source
 review, not legal certification or a release approval.
 
+## Experimental source-contribution notice (2026-10-04)
+
+The concise [user information](user-information.md) and companion PR drafts
+state that this is unofficial app-API access and that specific permission
+has not been established. BP-TERMS-01 remains open; disclosure is not a
+finding of permission or prohibition. The public German terms index and
+linked May 2026 PDF were rechecked on 2026-10-04. No account-specific terms,
+provider approval or installation data were inspected. No inquiry was sent.
+
 ## Source provenance
 
 | Source | Pinned evidence | Use and license conclusion |

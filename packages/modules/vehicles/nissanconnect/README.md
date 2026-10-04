@@ -5,6 +5,9 @@ Kamereon. It provides openWB with the SoC, range (if available) and actual
 measurement timestamp. The existing openWB control system handles display,
 query intervals, errors and charge limits.
 
+Read [Before using MyNISSAN EU](user-information.md) for the short service-access,
+credential-storage and privacy notice.
+
 ## Requirements and limitations
 
 - A European MyNISSAN account with a working login and an associated Nissan

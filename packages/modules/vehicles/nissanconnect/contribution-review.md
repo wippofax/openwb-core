@@ -95,10 +95,13 @@ comments that merely restate assignments are unnecessary.
 ## Prepared reviewer summary
 
 The existing Leaf module uses an incompatible service. This experimental EU
-MyNISSAN module reads cached Nissan battery status for the ZE1 and supplies SoC,
+MyNISSAN module reads cached Nissan battery status and supplies SoC,
 optional range/odometer and the original battery measurement timestamp through the existing
 vehicle wrapper. Its settings page offers an unsaved passive connection test
 with separate query and measurement times. It sends no wake or charge commands.
+The model-neutral display name does not imply universal compatibility: the Leaf
+ZE1 has positive private reports; other models remain unverified. See
+[supported-vehicles.md](supported-vehicles.md) for dated primary sources.
 
 On 2026-10-02 the full affected module suite passed **182 tests** using
 Python 3.9.2 and an already present portable Windows PHP 7.4.33 interpreter.
@@ -109,7 +112,7 @@ passed **57 endpoint/state tests**, including all 12 cases skipped on Windows.
 One non-Linux-only guard test was correctly skipped. Both PHP files pass syntax
 checks on Linux. Tests ran as an ordinary user on Linux tmpfs with synthetic
 fixtures and loopback HTTP servers. BP-SEC-01 is corrected and locally verified;
-the hardening is not deployed. This is not ARM/Apache or target-version Linux
+the hardened candidate was later installed privately (reported 2026-10-03). This Linux run alone is not ARM/Apache or target-version Linux
 acceptance. See [the Linux verification record](COMPATIBILITY.md#linux-php-verification-2026-10-02).
 The updated Nissan UI passes 24 tests and ESLint; the prior pinned build predates the odometer extension. These are
 affected-area checks, not complete openWB regression or release validation.

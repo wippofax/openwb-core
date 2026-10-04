@@ -1,5 +1,19 @@
 # Offline publication and build review
 
+## Subsequent private trial and publication preparation (2026-10-04)
+
+The dated offline findings below remain the review evidence. The reviewed
+369-file package was subsequently installed under separate private approval;
+settings/connection tests and good operation were reported by its tester. Its
+archive and recovery binding remain frozen. The publication sources now use
+Nissan – MyNISSAN EU (experimental), with Leaf ZE1-only practical test coverage;
+see [vehicle scope](supported-vehicles.md). That presentation change is not a
+rebuild or modification of the installed private package. Source contributions
+are being prepared; endpoint build placement, API terms and privacy disposition
+remain open. No public binary release or PR has been created by this review.
+
+## Original offline review
+
 Review date: 2026-10-02. Public source and synthetic fixtures only. No wallbox,
 Nissan account, captured response, private configuration, log or backup was read.
 This review prepares a candidate; it does not authorize deployment or publication.

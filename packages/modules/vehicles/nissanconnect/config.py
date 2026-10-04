@@ -15,7 +15,7 @@ class NissanConnectConfiguration:
 class NissanConnect:
     """Descriptor defaults consumed by the standard module loader and settings UI."""
 
-    def __init__(self, name: str = "Nissan Leaf ZE1 – MyNISSAN EU (experimental)",
+    def __init__(self, name: str = "Nissan – MyNISSAN EU (experimental)",
                  type: str = "nissanconnect", configuration: NissanConnectConfiguration = None):
         self.name = name
         self.type = type

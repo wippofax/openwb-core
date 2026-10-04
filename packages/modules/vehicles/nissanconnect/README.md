@@ -1,4 +1,4 @@
-# Nissan Leaf ZE1 / MyNISSAN EU (experimental)
+# Nissan – MyNISSAN EU (experimental)
 
 This module reads battery data stored by Nissan through MyNISSAN OneID and
 Kamereon. It provides openWB with the SoC, range (if available) and actual
@@ -7,7 +7,10 @@ query intervals, errors and charge limits.
 
 ## Requirements and limitations
 
-- A European MyNISSAN account with a working login and an associated Leaf ZE1.
+- A European MyNISSAN account with a working login and an associated Nissan
+  electric vehicle. **Only the Leaf ZE1 has been tested in practice.** Other
+  models are unverified; app compatibility alone does not establish module
+  compatibility. See [vehicle and regional scope](supported-vehicles.md).
   The app and service used by the vehicle matter, not just its model year.
 - NissanConnect EV and the existing `leaf` module use a different API.
   This module does not modify the existing Leaf module.
@@ -19,8 +22,12 @@ query intervals, errors and charge limits.
   returned data matching the official app. Overnight logs and GUI changes were
   also reported. These are qualitative reports, not independently inspected
   private data. Exact automatic cadence, sustained token renewal, other account
-  configurations, charging with the module's SoC and saved-settings removal
-  remain open acceptance items.
+  configurations and specific charging-limit behavior remain open acceptance
+  items. On 2026-10-03 the tester reported successful saved-settings removal of
+  the earlier candidate, retained histories, installation of the reviewed
+  candidate, and successful UI/connection tests. On 2026-10-04 the tester
+  reported that the module works well in use. This does not establish support
+  for additional models or separately verify odometer accuracy/token renewal.
 - Only cached server data is read. No wakeup, `refresh-battery-status` or vehicle
   charging start/stop commands are sent. If Nissan's data is old, the reported
   SoC may also be old. The original timestamp is preserved so openWB can use
@@ -41,7 +48,9 @@ repository now includes `docs/nissanconnect-2.2.3.md` and
 
 ## Configuration
 
-The module type is `nissanconnect`. The corresponding settings page is in the
+The display name is `Nissan – MyNISSAN EU (experimental)`. The module type is
+still `nissanconnect`; configuration keys and API behavior are unchanged. Saved
+custom names are not rewritten. The corresponding settings page is in the
 `openWB/openwb-ui-settings` repository at
 `src/components/vehicles/nissanconnect/vehicle.vue`.
 

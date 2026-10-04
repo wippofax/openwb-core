@@ -1,5 +1,22 @@
 # Compatibility check: openWB 2.2.3
 
+## Current evidence update (2026-10-04)
+
+The historical offline checks below are retained with their dates. A tester has
+since reported successful installation of the reviewed SoC/odometer candidate,
+a successful settings-page connection test, and good operation in everyday use
+on a Leaf ZE1. Saved-settings removal of the previous candidate also succeeded,
+with energy/yield histories retained. No private results were inspected.
+Specific odometer accuracy, sustained token renewal and charging-limit scenarios
+remain unverified. No other vehicle model is confirmed; see
+[vehicle and regional scope](supported-vehicles.md).
+
+The publication source now uses the model-neutral MyNISSAN EU display name and
+an explicit Leaf-only test-coverage notice. This copy-only change is not a new
+API implementation or a change to the already installed private test package.
+
+## Historical offline evidence
+
 Checked on 2026-09-14 against public Core commit
 [`3ced7f9cef3c70980ee1fab670f0d0717d1809ca`](https://github.com/openWB/core/commit/3ced7f9cef3c70980ee1fab670f0d0717d1809ca).
 Its `web/version` file contains `2.2.3`. The exact commit, rather than a moving

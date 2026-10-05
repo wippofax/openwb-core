@@ -6,10 +6,10 @@ import re
 import sys
 
 if __package__:
-    from .api import AuthenticationError, NissanClient, NissanError, RateLimitError, VIN_PATTERN
+    from .src.api import AuthenticationError, NissanClient, NissanError, RateLimitError, VIN_PATTERN
 else:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    from api import AuthenticationError, NissanClient, NissanError, RateLimitError, VIN_PATTERN
+    from src.api import AuthenticationError, NissanClient, NissanError, RateLimitError, VIN_PATTERN
 
 
 # Python validates decoded strings in characters; PHP also limits HTTP bytes.

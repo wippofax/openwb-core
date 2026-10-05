@@ -47,7 +47,7 @@ Later source/history changes need a corresponding scan update.
 The latest module was combined with the exact public 2.2.3 Core in a fresh
 export. Python 3.9.2 / PHP 7.4.33: **182 passed, 12 Linux-only skips**. The same
 PHP/test code already passed **57 Linux checks**, with one expected non-Linux
-skip; see [the Linux record](COMPATIBILITY.md#linux-php-verification-2026-10-02).
+skip; see [the Linux record](compatibility.md#linux-php-verification-2026-10-02).
 The pinned settings overlay passed **24 synthetic tests** and its Vite build.
 These are module/component checks, not full Core/Apache/ARM or live acceptance.
 

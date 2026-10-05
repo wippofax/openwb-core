@@ -6,7 +6,7 @@ from modules.common.abstract_device import DeviceDescriptor
 from modules.common.abstract_vehicle import VehicleUpdateData
 from modules.common.component_state import CarState
 from modules.common.configurable_vehicle import ConfigurableVehicle
-from modules.vehicles.nissanconnect.api import NissanClient
+from modules.vehicles.nissanconnect.src.api import NissanClient
 from modules.vehicles.nissanconnect.config import NissanConnect
 
 

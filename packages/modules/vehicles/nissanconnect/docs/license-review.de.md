@@ -13,7 +13,7 @@ Einstellungsoberfläche `776a60d`, Zielversion des Core
 
 **Ergebnis:** Für den geprüften, angepassten Quelltext besteht ein mit GPLv3
 vereinbarer Lizenzierungsweg. Der vorhandene MIT-Lizenztext ist korrekt; Herkunft
-und Änderungshinweis sind jetzt ausdrücklich in [NOTICE.md](NOTICE.md)
+und Änderungshinweis sind jetzt ausdrücklich in [NOTICE.md](../NOTICE.md)
 dokumentiert. Dieses Ergebnis belegt keine Erlaubnis für den inoffiziellen
 Zugriff auf den Dienst. Die endgültige Zusammenstellung des Veröffentlichungspakets
 und die unten beschriebene Frage des Dienstzugangs bleiben offen. Dies ist eine

@@ -5,8 +5,9 @@ from unittest.mock import Mock
 
 import pytest
 
-from modules.vehicles.nissanconnect import probe
-from modules.vehicles.nissanconnect.api import BatteryStatus
+from modules.vehicles.nissanconnect import connection_test
+from modules.vehicles.nissanconnect.tools import probe
+from modules.vehicles.nissanconnect.src.api import BatteryStatus
 
 
 @pytest.fixture
@@ -66,20 +67,33 @@ def test_probe_aborts_if_hidden_input_is_unavailable(monkeypatch, local_terminal
     factory.assert_not_called()
 
 
-def test_direct_probe_start_with_isolated_python_loads_adjacent_api(tmp_path):
-    # Reproduce embedded Python's missing script-directory search path without
-    # importing a real client or allowing a live request in the child process.
-    script = tmp_path / "probe.py"
-    script.write_text(Path(probe.__file__).read_text(encoding="utf-8"), encoding="utf-8")
-    (tmp_path / "api.py").write_text(
+@pytest.mark.parametrize("entrypoint,script_path,expected_exit_code,expected_output", [
+    (probe, "tools/probe.py", 2,
+     "Aborted: Please run in a private terminal outside a Codex or agent session."),
+    (connection_test, "connection_test.py", 0,
+     '{"success": false, "code": "agent_environment"}'),
+])
+def test_direct_entrypoint_with_isolated_python_loads_internal_api(
+        tmp_path, entrypoint, script_path, expected_exit_code, expected_output):
+    # Exercise both supported direct-start locations with a synthetic API only.
+    # A missing or incorrect import must fail before the agent guard can return.
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src/__init__.py").write_text("", encoding="utf-8")
+    script = tmp_path / script_path
+    script.parent.mkdir(exist_ok=True)
+    script.write_text(Path(entrypoint.__file__).read_text(encoding="utf-8"), encoding="utf-8")
+    (tmp_path / "src/api.py").write_text(
         'class NissanError(Exception): pass\n'
+        'class AuthenticationError(NissanError): pass\n'
+        'class RateLimitError(NissanError): pass\n'
+        'VIN_PATTERN = "synthetic"\n'
         'class NissanClient:\n'
         '    def __init__(self, *args, **kwargs):\n'
         '        raise AssertionError("No real client in the startup test")\n',
         encoding="utf-8")
     result = subprocess.run(
-        [probe.sys.executable, "-I", str(script)], cwd=str(tmp_path),
+        [probe.sys.executable, "-I", "-B", str(script)], cwd=str(tmp_path),
         env=dict(os.environ, CODEX_CI="1"), capture_output=True, text=True, timeout=10)
-    assert result.returncode == 2, result.stderr
-    assert "Aborted: Please run in a private terminal outside a Codex or agent session." in result.stdout
+    assert result.returncode == expected_exit_code, result.stderr
+    assert result.stdout.strip() == expected_output
     assert result.stderr == ""

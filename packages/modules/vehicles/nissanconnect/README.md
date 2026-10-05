@@ -5,10 +5,10 @@ Kamereon. It provides openWB with the SoC, range (if available) and actual
 measurement timestamp. The existing openWB control system handles display,
 query intervals, errors and charge limits.
 
-Read [Before using MyNISSAN EU](user-information.md) for the short service-access,
+Read [Before using MyNISSAN EU](docs/user-information.md) for the short service-access,
 credential-storage and privacy notice.
 
-See the [source map](source-map.md) for the current directory layout, each
+See the [source map](docs/source-map.md) for the current directory layout, each
 file's responsibility and the integration paths shared with the settings UI.
 
 ## Requirements and limitations
@@ -16,7 +16,7 @@ file's responsibility and the integration paths shared with the settings UI.
 - A European MyNISSAN account with a working login and an associated Nissan
   electric vehicle. **Only the Leaf ZE1 has been tested in practice.** Other
   models are unverified; app compatibility alone does not establish module
-  compatibility. See [vehicle and regional scope](supported-vehicles.md).
+  compatibility. See [vehicle and regional scope](docs/supported-vehicles.md).
   The app and service used by the vehicle matter, not just its model year.
 - NissanConnect EV and the existing `leaf` module use a different API.
   This module does not modify the existing Leaf module.
@@ -47,7 +47,7 @@ file's responsibility and the integration paths shared with the settings UI.
   time zone or is more than five minutes in the future, produces an error.
   A missing optional range does not invalidate an otherwise valid SoC.
 
-See [the exact-version compatibility report](COMPATIBILITY.md) for the local
+See [the exact-version compatibility report](docs/compatibility.md) for the local
 openWB 2.2.3 checks, UI requirements and existing error-handling behavior. The UI
 repository now includes `docs/nissanconnect-2.2.3.md` and
 `scripts/prepare-nissanconnect-2.2.3.py` for the locally verified target build.
@@ -71,7 +71,7 @@ Ambiguous selection or an unknown VIN produces an error.
 
 ## Data flow and secrets
 
-See [privacy and diagnostic data](privacy.md) for the reviewed configuration,
+See [privacy and diagnostic data](docs/privacy.md) for the reviewed configuration,
 MQTT, logging, backup and removal paths, including an unresolved inherited
 Core log-redaction limitation. Saved credentials are normal openWB
 configuration; same-origin testing does not encrypt an HTTP connection.
@@ -111,7 +111,7 @@ keep the current authentication state for reuse or normal renewal. Pauses keep
 only a bounded error message and its category, not an exception traceback;
 all retry state is in memory and resets with the client.
 
-See [error behavior and the Volkswagen comparison](error-handling.md) for the
+See [error behavior and the Volkswagen comparison](docs/error-handling.md) for the
 shared energy fallback and the unresolved charging policy when it is unavailable.
 These request pauses do not pause charging or override openWB's error counter.
 
@@ -127,7 +127,7 @@ query's battery values and separate query/measurement times using the current
 form values, without saving settings or updating charging control. It requires
 the Python module and a matching settings build, which includes the PHP
 endpoint from the settings repository's `public/modules/vehicles/nissanconnect/`.
-See [diagnostics and connection-test behavior](diagnostics.md) for log fields,
+See [diagnostics and connection-test behavior](docs/diagnostics.md) for log fields,
 the private cooldown metadata, access assumptions and testing limits.
 
 ## Offline validation
@@ -156,8 +156,8 @@ are separate from live module state. The test stops its own servers when done.
 From the Core repository root, using a Python 3.9 test environment:
 
 ```sh
-PYTHONPATH=packages python -m pytest -q packages/modules/vehicles/nissanconnect \
-  --confcutdir=packages/modules/vehicles/nissanconnect
+PYTHONPATH=packages python -m pytest -q packages/modules/vehicles/nissanconnect/tests \
+  --confcutdir=packages/modules/vehicles/nissanconnect/tests
 python -m flake8 packages/modules/vehicles/nissanconnect
 ```
 
@@ -168,7 +168,7 @@ and PHP are test prerequisites, not new vehicle-module dependencies):
 python -m pytest -q tests/nissanconnect
 npm ci --ignore-scripts
 npx eslint src/components/vehicles/nissanconnect
-npx vitest run src/components/vehicles/nissanconnect/vehicle.spec.js
+npx vitest run src/components/vehicles/nissanconnect/__tests__/vehicle.spec.js
 npm run build
 ```
 
@@ -193,11 +193,11 @@ offline test procedure.
    then observe the existing charging control with separately approved settings.
    A rollback is also a device change and must be covered by the approved plan.
 
-For step 1, the module includes `probe.py`, which must be started manually in
+For step 1, the module includes `tools/probe.py`, which must be started manually in
 a private local terminal outside Codex or cloud agents:
 
 ```sh
-python packages/modules/vehicles/nissanconnect/probe.py
+python packages/modules/vehicles/nissanconnect/tools/probe.py
 ```
 
 The probe asks for confirmation before the query, reads email, password and
@@ -206,7 +206,7 @@ the terminal. It rejects pipes, output redirection and some detectable agent
 environments. This is not a complete technical data loss prevention boundary:
 terminal recording, screen sharing, other agents and operating system monitoring
 cannot be ruled out. Never start a live test through model tools. The offline
-tests of `probe.py` use a replaced client.
+tests of `tools/probe.py` use a replaced client.
 
 The module contains no installation, SSH, MQTT or restart scripts.
 
@@ -226,9 +226,9 @@ References:
 - [OneID migration](https://github.com/dan-r/HomeAssistant-NissanConnect/pull/119)
 
 See [NOTICE.md](NOTICE.md) for attribution and the dated adaptation notice,
-[license and service-terms review](license-review.md) for the verified source
+[license and service-terms review](docs/license-review.md) for the verified source
 licenses and open service-access/distribution questions, and
-[contribution/source review](contribution-review.md) for the repository split
+[contribution/source review](docs/contribution-review.md) for the repository split
 and prepared reviewer summary. Software license compatibility does not establish
 permission to use the unofficial API client.
 
@@ -263,4 +263,4 @@ not a hard limit on the whole query's elapsed time.
 This extension is verified with synthetic responses only. Actual totalMileage
 availability/units for a particular Leaf still require a private comparison
 before accepting a new deployment. The previously frozen wallbox candidate is
-unchanged. See [diagnostics](diagnostics.md) and [privacy](privacy.md).
+unchanged. See [diagnostics](docs/diagnostics.md) and [privacy](docs/privacy.md).

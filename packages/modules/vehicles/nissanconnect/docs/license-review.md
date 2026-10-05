@@ -7,7 +7,7 @@ target Core `3ced7f9cef3c70980ee1fab670f0d0717d1809ca` and target settings
 
 **Result:** the reviewed adapted source has a GPLv3-compatible licensing path.
 The existing MIT text is correct; its provenance and modification notice are
-now explicit in [NOTICE.md](NOTICE.md). This finding does not establish
+now explicit in [NOTICE.md](../NOTICE.md). This finding does not establish
 permission for the unofficial service client. Final distribution packaging
 and the service-access question below remain open. This is a documented source
 review, not legal certification or a release approval.

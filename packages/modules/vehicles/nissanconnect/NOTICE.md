@@ -18,7 +18,7 @@ transport, bounded authentication and battery validation, passive queries,
 retry/error handling, native module integration and synthetic tests. The
 reference project is not responsible for these modifications.
 
-See [license-review.md](license-review.md) for exact provenance, distribution
+See [license-review.md](docs/license-review.md) for exact provenance, distribution
 obligations and unresolved service terms. Nissan and MyNISSAN are referenced
 to identify compatibility; this is an independent, unofficial integration.
 

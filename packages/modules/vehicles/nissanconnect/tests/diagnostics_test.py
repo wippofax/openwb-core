@@ -4,8 +4,8 @@ from unittest.mock import Mock
 
 import pytest
 
-from modules.vehicles.nissanconnect.api import AuthenticationError, NissanError
-from modules.vehicles.nissanconnect.api_test import MEASURED_UNIX_SECONDS, VIN, full_script, make_client, reply
+from modules.vehicles.nissanconnect.src.api import AuthenticationError, NissanError
+from modules.vehicles.nissanconnect.tests.helpers import MEASURED_UNIX_SECONDS, VIN, full_script, make_client, reply
 from modules.vehicles.nissanconnect.connection_test import run_test
 
 

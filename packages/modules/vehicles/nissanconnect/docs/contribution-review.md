@@ -38,7 +38,7 @@ its inherited MQTT log-redaction finding. Do not silently enlarge them.
 | openWB Core | Repository `LICENSE` contains GPL version 3 text; target `3ced7f9cef3c70980ee1fab670f0d0717d1809ca` | Integration APIs and neighboring-module conventions. Confirm final licensing notices and contribution requirements before publication. |
 | openWB settings | Repository `LICENSE` contains GPL version 3 text; development overlay `776a60d762b59be12b147ca4e37cb715fcfb0c82` | Vue component, inherited UI and build chain. A LICENSE file alone does not resolve every bundled asset's terms. |
 | Pinned 2.2.3 settings | `e8de268fa25f7efca2b5ffc005a757a2f36b530f`, recorded maintainer fork `Brett-S-OWB/openwb-ui-settings_BS_folk`; preparation script and compatibility guide | Build basis for the candidate. Use this lockfile for candidate review, not the newer development dependency versions. |
-| HomeAssistant-NissanConnect | `NOTICE.md` records `dan-r/HomeAssistant-NissanConnect` revision `b0bafe9108d4574e243aa182324584dbc68369ad` and an MIT notice for Daniel Raper (2024) | Adapted EU/OneID protocol/login flow in `api.py`. Pinned source and MIT text verified; provenance and modification notice retained in NOTICE.md. |
+| HomeAssistant-NissanConnect | `NOTICE.md` records `dan-r/HomeAssistant-NissanConnect` revision `b0bafe9108d4574e243aa182324584dbc68369ad` and an MIT notice for Daniel Raper (2024) | Adapted EU/OneID protocol/login flow in `src/api.py`. Pinned source and MIT text verified; provenance and modification notice retained in NOTICE.md. |
 | `Tobiaswk/dartnissanconnect`, mitchellrj work | Original research reference; the recorded primary reference credits these authors | No Dart package is imported/bundled by this module. MIT Dart license and Apache-2.0 Python origin verified. The direct HA client explicitly states permission to relicense Apache portions; see the detailed review. |
 | Python/PHP/runtime libraries | Python standard library imports in the API/worker/probe; existing openWB helper imports in the adapter; PHP built-ins | No new Python package, requirements-file change or mandatory PHP extension. Runtime/OpenSSL/distribution updates and licenses remain inherited platform responsibilities. |
 | Vue/build dependencies | Existing UI `package.json` and `package-lock.json` at both revisions above | The Nissan component adds no dependency. Transitive licenses/notices and final build artifacts still require review. |
@@ -115,7 +115,7 @@ One non-Linux-only guard test was correctly skipped. Both PHP files pass syntax
 checks on Linux. Tests ran as an ordinary user on Linux tmpfs with synthetic
 fixtures and loopback HTTP servers. BP-SEC-01 is corrected and locally verified;
 the hardened candidate was later installed privately (reported 2026-10-03). This Linux run alone is not ARM/Apache or target-version Linux
-acceptance. See [the Linux verification record](COMPATIBILITY.md#linux-php-verification-2026-10-02).
+acceptance. See [the Linux verification record](compatibility.md#linux-php-verification-2026-10-02).
 The updated Nissan UI passes 24 tests and ESLint; the prior pinned build predates the odometer extension. These are
 affected-area checks, not complete openWB regression or release validation.
 

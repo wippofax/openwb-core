@@ -5,7 +5,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from modules.vehicles.nissanconnect.api import BatteryStatus
+from modules.vehicles.nissanconnect.src.api import BatteryStatus
 from modules.vehicles.nissanconnect.config import NissanConnect, NissanConnectConfiguration
 
 
@@ -69,8 +69,8 @@ def test_configuration_roundtrip_uses_openwb_serializer():
 def test_module_logs_only_allowlisted_diagnostics(monkeypatch, soc_module, caplog):
     import json
     import logging
-    from modules.vehicles.nissanconnect.api_test import VIN, full_script, make_client, reply
-    from modules.vehicles.nissanconnect.api import NissanError
+    from modules.vehicles.nissanconnect.tests.helpers import VIN, full_script, make_client, reply
+    from modules.vehicles.nissanconnect.src.api import NissanError
 
     client, transport, _ = make_client(full_script() + [reply({"data": {"attributes": {"totalMileage": 12345.6}}})])
     wrapper = Mock()

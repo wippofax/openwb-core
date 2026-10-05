@@ -11,11 +11,11 @@ import sys
 import warnings
 
 if __package__:
-    from .api import NissanClient, NissanError
+    from ..src.api import NissanClient, NissanError
 else:
-    # Isolated/embedded Python omits the script directory from its search path.
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    from api import NissanClient, NissanError
+    # Isolated/embedded Python needs the module root to find the internal src package.
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from src.api import NissanClient, NissanError
 
 
 AGENT_ENVIRONMENT_VARIABLES = ("CODEX_THREAD_ID", "CODEX_SANDBOX", "CODEX_CI")

@@ -19,13 +19,13 @@ not all openWB releases or the effective configuration of any particular wallbox
 | --- | --- | --- |
 | Username, password, optional VIN entered in settings | Browser inputs and the existing Vue configuration store; a connection test sends JSON to the same-origin PHP endpoint and worker stdin | The component does not use local/session storage. Parent configuration state and browser autofill are separate; input masking is not encryption. Changing test inputs clears the displayed result, not the parent form. |
 | Saved account configuration for automatic queries | Standard `openWB/set/vehicle/<id>/soc_module/config` and retained `openWB/vehicle/<id>/soc_module/config`, Core memory, local broker persistence, permitted MQTT subscribers and the settings browser | Stored as ordinary configuration, without module-level encryption or automatic expiry. MQTT access control is inherited from the installation. |
-| Login forms, credentials, cookies, identity/access/refresh tokens | Wallbox Python process and fixed HTTPS Nissan/OneID/Kamereon endpoints in `api.py` | Tokens and cookies stay in the client object. A new configuration creates a new client. Process exit/discard releases references; Python does not promise secure memory erasure. Host swap, crash dumps and monitoring are outside this guarantee. |
+| Login forms, credentials, cookies, identity/access/refresh tokens | Wallbox Python process and fixed HTTPS Nissan/OneID/Kamereon endpoints in `src/api.py` | Tokens and cookies stay in the client object. A new configuration creates a new client. Process exit/discard releases references; Python does not promise secure memory erasure. Host swap, crash dumps and monitoring are outside this guarantee. |
 | Account ID and VIN returned by Nissan | Client memory and authenticated API requests to the fixed service origins | Used to select a vehicle and retrieve battery status; no module-written cache or diagnostic identifier. |
 | SoC, optional range/odometer and battery measurement time | API response, `CarState`, existing Core state/MQTT topics and normal display | Core owns stored values and histories. A new request does not invent a new measurement time. Existing subscribers, histories and backups have their own lifecycle. |
 | Query outcome, phase, HTTP status/count, query/measurement times, battery/odometer values and retry delays | `last_query` in memory; scheduled adapter writes its allowlisted summary at DEBUG; unsaved test returns the summary to PHP and selected fields to the browser | Still confidential vehicle/activity data even without a VIN or username. No complete response, URL, cookie or token is deliberately logged by this module. |
 | Account cooldown digest, local HMAC key and expiry times | PHP temporary directory `openwb-nissanconnect-test/state`; browser account countdown map | Account digests are pseudonymous, not anonymous: the file also holds the key and permits testing guessed account names. Browser keys contain normalized account names in memory. |
 
-The standalone `probe.py` instead reads credentials with hidden terminal input
+The standalone `tools/probe.py` instead reads credentials with hidden terminal input
 and prints battery/odometer values in that private terminal. It does not use MQTT or
 the settings endpoint. Agent/TTY checks are precautions, not protection against
 terminal recording, screen sharing or host inspection.
@@ -137,7 +137,7 @@ password at overall project completion and update the new value only privately.
 
 ## Reviewed boundaries and remaining evidence
 
-- `api.py`, `soc.py`, `config.py`, `connection_test.py`, `probe.py`: module data
+- `src/api.py`, `soc.py`, `config.py`, `connection_test.py`, `tools/probe.py`: module data
   handling, token reuse/renewal, fixed errors and logging; synthetic tests cover
   success, failures, deferred calls and redaction of module diagnostics.
 - Settings repository `public/modules/vehicles/nissanconnect/{test_connection,connection_test_lib}.php`

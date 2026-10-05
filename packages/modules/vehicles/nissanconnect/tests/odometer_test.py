@@ -3,8 +3,8 @@ import json
 
 import pytest
 
-from modules.vehicles.nissanconnect.api import CARS_BASE_URL, NissanError, RateLimitError, parse_odometer
-from modules.vehicles.nissanconnect.api_test import VIN, battery, full_script, make_client, reply
+from modules.vehicles.nissanconnect.src.api import CARS_BASE_URL, NissanError, RateLimitError, parse_odometer
+from modules.vehicles.nissanconnect.tests.helpers import VIN, battery, full_script, make_client, reply
 from modules.vehicles.nissanconnect.connection_test import run_test
 
 

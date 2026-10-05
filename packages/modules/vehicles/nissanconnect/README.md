@@ -8,6 +8,9 @@ query intervals, errors and charge limits.
 Read [Before using MyNISSAN EU](user-information.md) for the short service-access,
 credential-storage and privacy notice.
 
+See the [source map](source-map.md) for the current directory layout, each
+file's responsibility and the integration paths shared with the settings UI.
+
 ## Requirements and limitations
 
 - A European MyNISSAN account with a working login and an associated Nissan

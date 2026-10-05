@@ -11,14 +11,14 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 
 from modules.vehicles.nissanconnect.api import (
-    AUTH, CARS, AuthenticationError, HttpResponse, MAX_RESPONSE,
+    AUTH_BASE_URL, CARS_BASE_URL, AuthenticationError, HttpResponse, MAX_RESPONSE_BYTES,
     NissanClient, NissanError, PrivateTransport, RateLimitError, parse_battery)
 
 
 # Deliberately invented test values, unrelated to any account or vehicle.
 VIN = "SJNFAAZE1U0000001"
 SECOND_VIN = "SJNFAAZE1U0000002"
-MEASURED = 1640995200.0
+MEASURED_UNIX_SECONDS = 1640995200.0
 FORM = ('<form action="/commonauth"><input name="sessionDataKey" value="synthetic-session">'
         '<input name="regionCode" value="EU"><input name="password" type="password"></form>')
 
@@ -57,10 +57,11 @@ def login_script():
 
 def make_client(responses, vin=None):
     transport = ScriptedTransport(responses)
-    ticks = [0.0]
+    ticks_monotonic_seconds = [0.0]
     client = NissanClient("synthetic@example.invalid", "synthetic-password", vin, transport,
-                          clock=lambda: ticks[0], wall_clock=lambda: MEASURED + 86400)
-    return client, transport, ticks
+                          monotonic_seconds=lambda: ticks_monotonic_seconds[0],
+                          unix_seconds=lambda: MEASURED_UNIX_SECONDS + 86400)
+    return client, transport, ticks_monotonic_seconds
 
 
 def full_script(vehicles=None):
@@ -71,27 +72,29 @@ def full_script(vehicles=None):
 
 @pytest.mark.parametrize("soc", [0, 47.5, 100])
 def test_valid_soc_preserves_old_measurement(soc):
-    result = parse_battery(battery(soc, rangeHvacOn=0, rangeHvacOff=150), now=MEASURED + 86400)
-    assert (result.soc, result.timestamp, result.range_km) == (soc, MEASURED, 0)
+    result = parse_battery(battery(soc, rangeHvacOn=0, rangeHvacOff=150),
+                           now_unix_seconds=MEASURED_UNIX_SECONDS + 86400)
+    assert (result.soc_percent, result.measurement_unix_seconds, result.range_km) == (soc, MEASURED_UNIX_SECONDS, 0)
 
 
 @pytest.mark.parametrize("soc", [None, True, False, -1, 101, "47", float("nan"), float("inf"), [], {}])
 def test_invalid_soc_never_becomes_zero(soc):
     with pytest.raises(NissanError):
-        parse_battery(battery(soc), now=MEASURED)
+        parse_battery(battery(soc), now_unix_seconds=MEASURED_UNIX_SECONDS)
 
 
 @pytest.mark.parametrize("timestamp", [None, 0, "", "bad", "2022-01-01T00:00:00", "2099-01-01T00:00:00Z"])
 def test_missing_ambiguous_or_future_time_rejected(timestamp):
     with pytest.raises(NissanError):
-        parse_battery(battery(timestamp=timestamp), now=MEASURED)
+        parse_battery(battery(timestamp=timestamp), now_unix_seconds=MEASURED_UNIX_SECONDS)
 
 
 def test_offset_time_and_optional_range():
-    result = parse_battery(battery(timestamp="2022-01-01T01:00:00+01:00", rangeHvacOff=150), now=MEASURED)
-    assert result.timestamp == MEASURED
+    result = parse_battery(battery(timestamp="2022-01-01T01:00:00+01:00", rangeHvacOff=150),
+                           now_unix_seconds=MEASURED_UNIX_SECONDS)
+    assert result.measurement_unix_seconds == MEASURED_UNIX_SECONDS
     assert result.range_km == 150
-    assert parse_battery(battery(rangeHvacOn=-1), now=MEASURED).range_km is None
+    assert parse_battery(battery(rangeHvacOn=-1), now_unix_seconds=MEASURED_UNIX_SECONDS).range_km is None
 
 
 @pytest.mark.parametrize("body", [{}, {"data": None}, {"data": {"attributes": {}}}, [], None])
@@ -104,7 +107,8 @@ def test_login_pkce_selection_and_cached_battery_only(caplog):
     caplog.set_level(logging.DEBUG)
     client, transport, _ = make_client(full_script())
     status = client.fetch_battery()
-    assert status.soc == 47 and status.timestamp == MEASURED and status.range_km == 123.4
+    assert (status.soc_percent == 47 and status.measurement_unix_seconds == MEASURED_UNIX_SECONDS
+            and status.range_km == 123.4)
     calls = transport.calls
     authorize = parse_qs(urlsplit(calls[0][1]).query)
     verifier = calls[2][2]["form"]["code_verifier"]
@@ -114,9 +118,9 @@ def test_login_pkce_selection_and_cached_battery_only(caplog):
     assert calls[1][2]["form"]["username"] == "EU/synthetic@example.invalid"
     assert calls[3][2]["headers"]["Authorization"] == "synthetic-id"
     assert calls[-1][2]["headers"]["Authorization"] == "Bearer synthetic-access"
-    assert calls[-1][:2] == ("GET", CARS + "v1/cars/" + VIN + "/battery-status")
+    assert calls[-1][:2] == ("GET", CARS_BASE_URL + "v1/cars/" + VIN + "/battery-status")
     assert all("/actions/" not in url for _, url, _ in calls)
-    assert all(0 < kwargs["timeout"] <= 10 for _, _, kwargs in calls)
+    assert all(0 < kwargs["timeout_seconds"] <= 10 for _, _, kwargs in calls)
     assert not caplog.records
     assert not transport.responses
 
@@ -125,15 +129,15 @@ def test_subsequent_update_reuses_tokens_and_vehicle():
     client, transport, _ = make_client(full_script() + [reply(battery(48))])
     client.fetch_battery()
     count = len(transport.calls)
-    assert client.fetch_battery().soc == 48
+    assert client.fetch_battery().soc_percent == 48
     assert len(transport.calls) == count + 1
 
 
 def test_expired_token_is_refreshed_in_memory():
     script = full_script() + [reply({"access_token": "synthetic-renewed"}), reply(battery())]
-    client, transport, ticks = make_client(script)
+    client, transport, ticks_monotonic_seconds = make_client(script)
     client.fetch_battery()
-    ticks[0] = 3600
+    ticks_monotonic_seconds[0] = 3600
     client.fetch_battery()
     assert "refresh-token" in transport.calls[-2][1]
     assert transport.calls[-2][2]["headers"]["Authorization"] == "synthetic-refresh"
@@ -142,9 +146,9 @@ def test_expired_token_is_refreshed_in_memory():
 
 def test_rejected_refresh_logs_in_once():
     script = full_script() + [reply({"error": "invalid_grant"}, 400)] + login_script() + [reply(battery())]
-    client, transport, ticks = make_client(script)
+    client, transport, ticks_monotonic_seconds = make_client(script)
     client.fetch_battery()
-    ticks[0] = 3600
+    ticks_monotonic_seconds[0] = 3600
     client.fetch_battery()
     assert sum("oauth2/authorize?" in url for _, url, _ in transport.calls) == 2
     assert transport.cookies_cleared == 2
@@ -213,18 +217,19 @@ def test_configured_vehicle_is_selected():
 
 
 def test_rate_limit_pauses_later_updates_without_sleeping():
-    client, transport, ticks = make_client(full_script() + [reply("private", 429, {"Retry-After": "600"})])
+    client, transport, ticks_monotonic_seconds = make_client(
+        full_script() + [reply("private", 429, {"Retry-After": "600"})])
     client.fetch_battery()
     with pytest.raises(RateLimitError):
         client.fetch_battery()
-    ticks[0] = 599
+    ticks_monotonic_seconds[0] = 599
     count = len(transport.calls)
     with pytest.raises(RateLimitError):
         client.fetch_battery()
     assert len(transport.calls) == count
-    ticks[0] = 600
+    ticks_monotonic_seconds[0] = 600
     transport.responses.append(reply(battery()))
-    assert client.fetch_battery().soc == 47
+    assert client.fetch_battery().soc_percent == 47
 
 
 @pytest.mark.parametrize("response", [
@@ -253,7 +258,7 @@ def test_transport_hides_exception_details_and_response_repr(monkeypatch, caplog
 
     monkeypatch.setattr(transport._opener, "open", fail)
     with pytest.raises(NissanError) as error:
-        transport.request("GET", AUTH)
+        transport.request("GET", AUTH_BASE_URL)
     formatted = "".join(traceback.format_exception(type(error.value), error.value, error.value.__traceback__))
     assert private_value not in formatted
     assert private_value not in repr(reply(private_value, headers={"Authorization": private_value}))
@@ -264,10 +269,10 @@ def test_transport_returns_redirect_without_following(monkeypatch):
     transport = PrivateTransport()
 
     def respond(*args, **kwargs):
-        raise HTTPError(AUTH, 302, "redirect", {"Location": "/next"}, io.BytesIO(b""))
+        raise HTTPError(AUTH_BASE_URL, 302, "redirect", {"Location": "/next"}, io.BytesIO(b""))
 
     monkeypatch.setattr(transport._opener, "open", respond)
-    result = transport.request("GET", AUTH)
+    result = transport.request("GET", AUTH_BASE_URL)
     assert result.status == 302 and result.headers["Location"] == "/next"
 
 
@@ -275,18 +280,18 @@ def test_transport_limits_response_size(monkeypatch):
     transport = PrivateTransport()
 
     def respond(*args, **kwargs):
-        raise HTTPError(AUTH, 500, "error", {}, io.BytesIO(b"x" * (MAX_RESPONSE + 1)))
+        raise HTTPError(AUTH_BASE_URL, 500, "error", {}, io.BytesIO(b"x" * (MAX_RESPONSE_BYTES + 1)))
 
     monkeypatch.setattr(transport._opener, "open", respond)
     with pytest.raises(NissanError, match="too large"):
-        transport.request("GET", AUTH)
+        transport.request("GET", AUTH_BASE_URL)
 
 
 def test_total_request_budget_stops_redirect_chain():
-    client, transport, ticks = make_client([])
+    client, transport, ticks_monotonic_seconds = make_client([])
 
     def slow_response(calls):
-        ticks[0] += 61
+        ticks_monotonic_seconds[0] += 61
         return reply("", 302, {"Location": "/next"})
 
     transport.responses.append(slow_response)
@@ -300,44 +305,44 @@ def test_total_request_budget_stops_redirect_chain():
     reply("not-json"), reply(battery(soc=None)),
 ])
 def test_failed_query_pauses_without_reauthentication_and_recovers(response, caplog):
-    client, transport, ticks = make_client(full_script() + [response, reply(battery(48))])
+    client, transport, ticks_monotonic_seconds = make_client(full_script() + [response, reply(battery(48))])
     client.fetch_battery()
     with pytest.raises(NissanError):
         client.fetch_battery()
     count = len(transport.calls)
-    ticks[0] = 299
+    ticks_monotonic_seconds[0] = 299
     with pytest.raises(NissanError, match="paused") as error:
         client.fetch_battery()
     assert len(transport.calls) == count
     assert "synthetic-private-body" not in str(error.value)
-    ticks[0] = 300
-    assert client.fetch_battery().soc == 48
+    ticks_monotonic_seconds[0] = 300
+    assert client.fetch_battery().soc_percent == 48
     assert len(transport.calls) == count + 1
     assert not caplog.records
 
 
 def test_repeated_outages_back_off_to_one_hour_and_success_resets_delay():
-    client, transport, ticks = make_client(full_script())
+    client, transport, ticks_monotonic_seconds = make_client(full_script())
     client.fetch_battery()
-    for delay in (300, 600, 1200, 2400, 3600, 3600):
+    for delay_seconds in (300, 600, 1200, 2400, 3600, 3600):
         transport.responses.append(reply("synthetic-private-body", 503))
         with pytest.raises(NissanError):
             client.fetch_battery()
         count = len(transport.calls)
-        ticks[0] += delay - 1
+        ticks_monotonic_seconds[0] += delay_seconds - 1
         with pytest.raises(NissanError, match="paused"):
             client.fetch_battery()
         assert len(transport.calls) == count
-        ticks[0] += 1
+        ticks_monotonic_seconds[0] += 1
         # Keep the synthetic token alive; expiry/renewal is tested separately.
-        client._expires_at = ticks[0] + 7200
+        client._expires_at_monotonic_seconds = ticks_monotonic_seconds[0] + 7200
     transport.responses.extend([reply(battery(49)), reply("private", 503)])
-    assert client.fetch_battery().soc == 49
+    assert client.fetch_battery().soc_percent == 49
     with pytest.raises(NissanError):
         client.fetch_battery()
-    ticks[0] += 300
+    ticks_monotonic_seconds[0] += 300
     transport.responses.append(reply(battery(50)))
-    assert client.fetch_battery().soc == 50
+    assert client.fetch_battery().soc_percent == 50
 
 
 @pytest.mark.parametrize("status", [429, 503])
@@ -346,24 +351,24 @@ def test_repeated_outages_back_off_to_one_hour_and_success_resets_delay():
     ("Sun, 02 Jan 2022 00:01:00 GMT", 300), ("-1", 300), ("bad-date", 300),
 ])
 def test_retry_after_seconds_and_http_date_are_respected(status, header, expected_delay):
-    client, transport, ticks = make_client(full_script() + [
+    client, transport, ticks_monotonic_seconds = make_client(full_script() + [
         reply("private", status, {"rEtRy-AfTeR": header}), reply(battery())])
     client.fetch_battery()
     with pytest.raises(NissanError):
         client.fetch_battery()
     count = len(transport.calls)
-    ticks[0] = expected_delay - 1
+    ticks_monotonic_seconds[0] = expected_delay - 1
     with pytest.raises(NissanError, match="paused"):
         client.fetch_battery()
     assert len(transport.calls) == count
-    ticks[0] = expected_delay
-    assert client.fetch_battery().soc == 47
+    ticks_monotonic_seconds[0] = expected_delay
+    assert client.fetch_battery().soc_percent == 47
 
 
 def test_timeout_pauses_requests_without_retaining_exception_traceback():
     def timeout(calls):
         raise NissanError("Nissan is unreachable or returned an invalid response.")
-    client, transport, ticks = make_client(full_script() + [timeout, reply(battery())])
+    client, transport, ticks_monotonic_seconds = make_client(full_script() + [timeout, reply(battery())])
     client.fetch_battery()
     with pytest.raises(NissanError):
         client.fetch_battery()
@@ -373,13 +378,13 @@ def test_timeout_pauses_requests_without_retaining_exception_traceback():
             client.fetch_battery()
     assert len(transport.calls) == count
     assert not any(isinstance(value, BaseException) for value in vars(client).values())
-    ticks[0] = 300
-    assert client.fetch_battery().soc == 47
+    ticks_monotonic_seconds[0] = 300
+    assert client.fetch_battery().soc_percent == 47
 
 
 def test_unrepresentable_optional_range_preserves_valid_soc():
-    result = parse_battery(battery(rangeHvacOn=10 ** 400), now=MEASURED)
-    assert (result.soc, result.timestamp, result.range_km) == (47, MEASURED, None)
+    result = parse_battery(battery(rangeHvacOn=10 ** 400), now_unix_seconds=MEASURED_UNIX_SECONDS)
+    assert (result.soc_percent, result.measurement_unix_seconds, result.range_km) == (47, MEASURED_UNIX_SECONDS, None)
 
 
 def test_unrepresentable_token_lifetime_is_safe_and_pauses_retry():
@@ -411,22 +416,22 @@ def test_malformed_login_destination_is_safe_and_pauses_retry(during_form):
 
 
 def test_rotated_refresh_token_is_used_on_next_expiry():
-    client, transport, ticks = make_client(full_script() + [
+    client, transport, ticks_monotonic_seconds = make_client(full_script() + [
         reply({"access_token": "synthetic-next-access", "refresh_token": "synthetic-next-refresh"}),
         reply(battery()), reply({"access_token": "synthetic-final-access"}), reply(battery())])
     client.fetch_battery()
-    ticks[0] = 3600
+    ticks_monotonic_seconds[0] = 3600
     client.fetch_battery()
-    ticks[0] = 7200
+    ticks_monotonic_seconds[0] = 7200
     client.fetch_battery()
     assert transport.calls[-2][2]["headers"]["Authorization"] == "synthetic-next-refresh"
     assert transport.calls[-1][2]["headers"]["Authorization"] == "Bearer synthetic-final-access"
 
 
 def test_refresh_service_failure_does_not_fall_back_to_password_login():
-    client, transport, ticks = make_client(full_script() + [reply("synthetic-private-body", 503)])
+    client, transport, ticks_monotonic_seconds = make_client(full_script() + [reply("synthetic-private-body", 503)])
     client.fetch_battery()
-    ticks[0] = 3600
+    ticks_monotonic_seconds[0] = 3600
     with pytest.raises(NissanError):
         client.fetch_battery()
     assert len(transport.calls) == 8

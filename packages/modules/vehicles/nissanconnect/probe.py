@@ -18,19 +18,26 @@ else:
     from api import NissanClient, NissanError
 
 
+AGENT_ENVIRONMENT_VARIABLES = ("CODEX_THREAD_ID", "CODEX_SANDBOX", "CODEX_CI")
+EXIT_SUCCESS = 0
+EXIT_QUERY_FAILED = 1
+EXIT_UNSAFE_TERMINAL = 2
+EXIT_INTERRUPTED = 130
+
+
 def main():
-    if any(os.environ.get(name) for name in ("CODEX_THREAD_ID", "CODEX_SANDBOX", "CODEX_CI")):
+    if any(os.environ.get(name) for name in AGENT_ENVIRONMENT_VARIABLES):
         print("Aborted: Please run in a private terminal outside a Codex or agent session.")
-        return 2
+        return EXIT_UNSAFE_TERMINAL
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         print("Aborted: An interactive local terminal is required; no redirection or pipes.")
-        return 2
+        return EXIT_UNSAFE_TERMINAL
     print("Local MyNISSAN test: This request sends credentials directly to Nissan.")
     print("No wallbox connection. No files are written. The result is confidential.")
     print("Only use outside cloud agents, terminal recording and screen sharing.")
     print("The environment check is a precaution, not a complete technical safeguard.")
     if input("Query cached battery and odometer data now? [y/N] ").strip().lower() != "y":
-        return 0
+        return EXIT_SUCCESS
     try:
         with warnings.catch_warnings():
             # getpass must abort instead of falling back to an echoed input.
@@ -41,8 +48,8 @@ def main():
         # This separate process owns logging; never expose dependency debug output.
         logging.disable(logging.CRITICAL)
         status = NissanClient(user, password, vin).fetch_battery(include_odometer=True)
-        measured = datetime.fromtimestamp(status.timestamp, tz=timezone.utc).astimezone()
-        print("SoC: {:g} %".format(status.soc))
+        measured = datetime.fromtimestamp(status.measurement_unix_seconds, tz=timezone.utc).astimezone()
+        print("SoC: {:g} %".format(status.soc_percent))
         print("Measurement time: " + measured.isoformat())
         if status.range_km is not None:
             print("Range: {:g} km".format(status.range_km))
@@ -51,20 +58,20 @@ def main():
         else:
             print("Odometer: Not available; battery query succeeded.")
         print("Compare with MyNISSAN. Do not copy values, screenshots or credentials into a cloud chat.")
-        return 0
+        return EXIT_SUCCESS
     except GetPassWarning:
         print("Hidden input is unavailable in this terminal. Aborted.")
-        return 2
+        return EXIT_UNSAFE_TERMINAL
     except NissanError as error:
         print("Query failed: " + str(error))
-        return 1
+        return EXIT_QUERY_FAILED
     except (KeyboardInterrupt, EOFError):
         print("Aborted.")
-        return 130
+        return EXIT_INTERRUPTED
     except Exception:
         # Never print an unexpected exception/traceback with potentially private data.
         print("Unexpected local error; no confidential details were displayed.")
-        return 1
+        return EXIT_QUERY_FAILED
 
 
 if __name__ == "__main__":

@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from modules.vehicles.nissanconnect.api import CARS, NissanError, RateLimitError, parse_odometer
+from modules.vehicles.nissanconnect.api import CARS_BASE_URL, NissanError, RateLimitError, parse_odometer
 from modules.vehicles.nissanconnect.api_test import VIN, battery, full_script, make_client, reply
 from modules.vehicles.nissanconnect.connection_test import run_test
 
@@ -29,19 +29,20 @@ def test_missing_odometer_and_malformed_shapes_are_optional(body):
 
 
 def test_passive_query_preserves_battery_time_and_does_not_reuse_old_odometer():
-    client, transport, ticks = make_client(full_script() + [reply(cockpit()), reply(battery()), reply(cockpit(None))])
+    client, transport, ticks_monotonic_seconds = make_client(
+        full_script() + [reply(cockpit()), reply(battery()), reply(cockpit(None))])
     first = client.fetch_battery(include_odometer=True)
     assert first.odometer_km == 12345.6
-    assert first.timestamp == 1640995200
-    assert transport.calls[-1][:2] == ("GET", CARS + "v1/cars/" + VIN + "/cockpit")
+    assert first.measurement_unix_seconds == 1640995200
+    assert transport.calls[-1][:2] == ("GET", CARS_BASE_URL + "v1/cars/" + VIN + "/cockpit")
     assert transport.calls[-1][2]["headers"]["Authorization"] == "Bearer synthetic-access"
     assert client.last_query["odometer_outcome"] == "success"
     assert client.last_query["odometer_http_status"] == 200
     assert client.last_query["odometer_received_at"] == "2022-01-02T00:00:00+00:00"
     assert client.last_query["measurement_at"] == "2022-01-01T00:00:00+00:00"
-    ticks[0] = 10
+    ticks_monotonic_seconds[0] = 10
     second = client.fetch_battery(include_odometer=True)
-    assert second.soc == 47 and second.odometer_km is None
+    assert second.soc_percent == 47 and second.odometer_km is None
     assert client.last_query["odometer_outcome"] == "unavailable"
     assert client.last_query["odometer_received_at"] is None
     assert all("/actions/" not in url for _, url, _ in transport.calls)
@@ -52,22 +53,22 @@ def test_passive_query_preserves_battery_time_and_does_not_reuse_old_odometer():
 def test_optional_http_error_keeps_soc_and_does_not_repeat_login_or_block_battery(status):
     script = full_script() + [reply("synthetic-private-body", status), reply(battery(48)),
                               reply(battery(49)), reply(cockpit(12346))]
-    client, transport, ticks = make_client(script)
+    client, transport, ticks_monotonic_seconds = make_client(script)
     result = client.fetch_battery(include_odometer=True)
-    assert result.soc == 47 and result.odometer_km is None
+    assert result.soc_percent == 47 and result.odometer_km is None
     assert len(transport.calls) == 8
     assert client.last_query["outcome"] == "success"
     assert client.last_query["odometer_outcome"] == "failed"
     assert client.last_query["odometer_http_status"] == status
     assert client.last_query["retry_after_seconds"] == 0
     assert "synthetic-private-body" not in json.dumps(client.last_query)
-    ticks[0] = 10
-    assert client.fetch_battery(include_odometer=True).soc == 48
+    ticks_monotonic_seconds[0] = 10
+    assert client.fetch_battery(include_odometer=True).soc_percent == 48
     assert len(transport.calls) == 9
     assert client.last_query["odometer_outcome"] == "deferred"
     assert client.last_query["odometer_http_status"] is None
     assert client.last_query["odometer_retry_after_seconds"] == 290
-    ticks[0] = 300
+    ticks_monotonic_seconds[0] = 300
     assert client.fetch_battery(include_odometer=True).odometer_km == 12346
     assert len(transport.calls) == 11
     assert not transport.responses
@@ -78,8 +79,8 @@ def test_optional_http_error_keeps_soc_and_does_not_repeat_login_or_block_batter
     (503, {"Retry-After": "600"}, 600, NissanError)])
 def test_provider_pause_from_optional_query_survives_battery_success(status, headers, pause, error_type):
     script = full_script() + [reply({}, status, headers), reply(battery()), reply(cockpit())]
-    client, transport, ticks = make_client(script)
-    assert client.fetch_battery(include_odometer=True).soc == 47
+    client, transport, ticks_monotonic_seconds = make_client(script)
+    assert client.fetch_battery(include_odometer=True).soc_percent == 47
     assert client.last_query["provider_retry_after_seconds"] == pause
     count = len(transport.calls)
     with pytest.raises(error_type, match="paused"):
@@ -87,7 +88,7 @@ def test_provider_pause_from_optional_query_survives_battery_success(status, hea
     assert len(transport.calls) == count
     assert client.last_query["odometer_km"] is None
     assert client.last_query["odometer_outcome"] == "not_requested"
-    ticks[0] = pause
+    ticks_monotonic_seconds[0] = pause
     assert client.fetch_battery(include_odometer=True).odometer_km == 12345.6
     assert client.last_query["provider_retry_after_seconds"] == 0
 
@@ -95,7 +96,7 @@ def test_provider_pause_from_optional_query_survives_battery_success(status, hea
 @pytest.mark.parametrize("body", ["invalid synthetic JSON", {"errors": ["synthetic-private-body"]}])
 def test_bad_optional_response_keeps_successful_battery(body):
     client, _, _ = make_client(full_script() + [reply(body)])
-    assert client.fetch_battery(include_odometer=True).soc == 47
+    assert client.fetch_battery(include_odometer=True).soc_percent == 47
     assert client.last_query["odometer_outcome"] == "failed"
     assert "synthetic-private-body" not in json.dumps(client.last_query)
 
@@ -104,7 +105,7 @@ def test_optional_transport_error_keeps_successful_battery():
     def timeout(calls):
         raise NissanError("Synthetic transport timeout.")
     client, _, _ = make_client(full_script() + [timeout])
-    assert client.fetch_battery(include_odometer=True).soc == 47
+    assert client.fetch_battery(include_odometer=True).soc_percent == 47
     assert client.last_query["odometer_http_status"] is None
     assert client.last_query["outcome"] == "success"
 
@@ -114,13 +115,13 @@ def test_no_cockpit_request_after_battery_failure_or_exhausted_budget():
     with pytest.raises(NissanError):
         client.fetch_battery(include_odometer=True)
     assert not any(url.endswith("/cockpit") for _, url, _ in transport.calls)
-    client, transport, ticks = make_client(full_script())
+    client, transport, ticks_monotonic_seconds = make_client(full_script())
 
     def slow_battery(calls):
-        ticks[0] = 61
+        ticks_monotonic_seconds[0] = 61
         return reply(battery())
     transport.responses[-1] = slow_battery
-    assert client.fetch_battery(include_odometer=True).soc == 47
+    assert client.fetch_battery(include_odometer=True).soc_percent == 47
     assert len(transport.calls) == 7
     assert client.last_query["odometer_outcome"] == "failed"
 
@@ -138,7 +139,7 @@ def test_unsaved_test_accepts_partial_success_and_preserves_provider_pause():
 
 def test_zero_retry_after_does_not_remove_rate_limit_backoff():
     client, transport, _ = make_client(full_script() + [reply({}, 429, {"Retry-After": "0"})])
-    assert client.fetch_battery(include_odometer=True).soc == 47
+    assert client.fetch_battery(include_odometer=True).soc_percent == 47
     assert client.last_query["retry_after_seconds"] == 300
     with pytest.raises(RateLimitError, match="paused"):
         client.fetch_battery(include_odometer=True)

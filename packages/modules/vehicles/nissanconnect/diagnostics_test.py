@@ -5,13 +5,13 @@ from unittest.mock import Mock
 import pytest
 
 from modules.vehicles.nissanconnect.api import AuthenticationError, NissanError
-from modules.vehicles.nissanconnect.api_test import MEASURED, VIN, full_script, make_client, reply
+from modules.vehicles.nissanconnect.api_test import MEASURED_UNIX_SECONDS, VIN, full_script, make_client, reply
 from modules.vehicles.nissanconnect.connection_test import run_test
 
 
 def test_diagnostics_distinguish_contact_measurement_failure_and_deferred_update():
-    client, transport, ticks = make_client(full_script() + [reply('synthetic-private-body', 503)])
-    client._wall_clock = lambda: MEASURED + 86400 + ticks[0]
+    client, transport, ticks_monotonic_seconds = make_client(full_script() + [reply('synthetic-private-body', 503)])
+    client._unix_seconds = lambda: MEASURED_UNIX_SECONDS + 86400 + ticks_monotonic_seconds[0]
     client.fetch_battery()
     success = client.last_query.copy()
     assert success['outcome'] == 'success'
@@ -20,7 +20,7 @@ def test_diagnostics_distinguish_contact_measurement_failure_and_deferred_update
     assert success['request_started_at'] == '2022-01-02T00:00:00+00:00'
     assert success['data_age_seconds'] == 86400
     assert (success['soc'], success['range_km']) == (47, 123.4)
-    ticks[0] = 10
+    ticks_monotonic_seconds[0] = 10
     with pytest.raises(NissanError):
         client.fetch_battery()
     failure = client.last_query.copy()
@@ -29,7 +29,7 @@ def test_diagnostics_distinguish_contact_measurement_failure_and_deferred_update
     assert failure['soc'] is None and failure['measurement_at'] is None
     assert failure['last_success_at'] == success['completed_at']
     assert failure['last_measurement_at'] == success['measurement_at']
-    ticks[0] = 20
+    ticks_monotonic_seconds[0] = 20
     requests = len(transport.calls)
     with pytest.raises(NissanError):
         client.fetch_battery()

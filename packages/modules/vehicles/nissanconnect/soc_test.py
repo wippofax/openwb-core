@@ -89,7 +89,7 @@ def test_module_logs_only_allowlisted_diagnostics(monkeypatch, soc_module, caplo
     assert not any(record.exc_info for record in caplog.records)
 
     # A deferred call is logged as such, without a new contact or measured value.
-    client._retry_at = 300
+    client._retry_at_monotonic_seconds = 300
     client._retry_reason = "Synthetic wait."
     calls = len(transport.calls)
     with pytest.raises(NissanError):

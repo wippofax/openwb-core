@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 import hashlib
 from html.parser import HTMLParser
+from http import HTTPStatus
 from http.client import HTTPException
 from http.cookiejar import CookieJar
 import json
@@ -24,15 +25,49 @@ from urllib.parse import parse_qs, quote, urlencode, urljoin, urlsplit
 from urllib.request import build_opener, HTTPCookieProcessor, HTTPRedirectHandler, HTTPSHandler, Request
 
 
-AUTH = "https://login.mynissan-account.com/"
-BFF = "https://nci-bff-web-prod.apps.eu2.kamereon.io/bff-web/"
-USERS = "https://alliance-platform-usersadapter-prod.apps.eu2.kamereon.io/user-adapter/"
-CARS = "https://alliance-platform-caradapter-prod.apps.eu2.kamereon.io/car-adapter/"
-CALLBACK = "com://wso2.service.nci"
+AUTH_BASE_URL = "https://login.mynissan-account.com/"
+BFF_BASE_URL = "https://nci-bff-web-prod.apps.eu2.kamereon.io/bff-web/"
+USERS_BASE_URL = "https://alliance-platform-usersadapter-prod.apps.eu2.kamereon.io/user-adapter/"
+CARS_BASE_URL = "https://alliance-platform-caradapter-prod.apps.eu2.kamereon.io/car-adapter/"
+OAUTH_CALLBACK_URI = "com://wso2.service.nci"
 # Public application identifier from the reference implementation; not a secret.
-CLIENT_ID = "ZM3WK7ax1OtQKYQ8Qqzcv5VgiA8a"
-SCOPE = "openid name profile email offline_access"
-MAX_RESPONSE = 1024 * 1024
+OAUTH_CLIENT_ID = "ZM3WK7ax1OtQKYQ8Qqzcv5VgiA8a"
+OAUTH_LOGIN_SCOPE = "openid name profile email offline_access"
+# Transport/query limits use seconds and bytes, not decoded character counts.
+MAX_RESPONSE_BYTES = 1024 * 1024
+SOCKET_TIMEOUT_SECONDS = 10
+QUERY_BUDGET_SECONDS = 60
+MAX_MEASUREMENT_FUTURE_SKEW_SECONDS = 300
+DEFAULT_HTTPS_PORT = 443
+MAX_LOGIN_REDIRECTS = 10
+MAX_AUTHENTICATED_REQUEST_ATTEMPTS = 2
+
+# Keep separate policies separate even when their current values are equal.
+DEFAULT_TOKEN_LIFETIME_SECONDS = 3600
+TOKEN_REFRESH_MARGIN_SECONDS = 30
+DEFAULT_RETRY_AFTER_SECONDS = 300
+MIN_RETRY_AFTER_SECONDS = 300
+MAX_RETRY_AFTER_SECONDS = 86400
+INITIAL_FAILURE_BACKOFF_SECONDS = 300
+MAX_FAILURE_BACKOFF_SECONDS = 3600
+MAX_FAILURE_BACKOFF_STEPS = 5
+FAILURE_BACKOFF_MULTIPLIER = 2
+ODOMETER_FAILURE_BACKOFF_SECONDS = 300
+MAX_SOC_PERCENT = 100
+DURATION_DECIMAL_PLACES = 3
+DATA_AGE_DECIMAL_PLACES = 1
+
+PKCE_VERIFIER_RANDOM_BYTES = 64
+OAUTH_STATE_RANDOM_BYTES = 32
+VIN_PATTERN = r"[A-HJ-NPR-Z0-9]{17}"
+JSON_API_CONTENT_TYPE = "application/vnd.api+json"
+OAUTH_REFRESH_SCOPE = "openid profile vehicles"
+DIAGNOSTIC_SOURCE = "nissan_cached_api"
+INVALID_BATTERY_VALUE_MESSAGE = "Nissan returned an invalid battery value."
+INVALID_LOGIN_REDIRECT_MESSAGE = "Unexpected redirect during Nissan login."
+INVALID_LOGIN_FORM_DESTINATION_MESSAGE = "Unexpected Nissan login form destination."
+REDIRECT_STATUSES = (HTTPStatus.MOVED_PERMANENTLY, HTTPStatus.FOUND, HTTPStatus.SEE_OTHER,
+                     HTTPStatus.TEMPORARY_REDIRECT, HTTPStatus.PERMANENT_REDIRECT)
 
 
 class NissanError(Exception):
@@ -78,7 +113,7 @@ class PrivateTransport:
     def clear_cookies(self):
         self._cookies.clear()
 
-    def request(self, method, url, headers=None, form=None, json_body=None, timeout=10):
+    def request(self, method, url, headers=None, form=None, json_body=None, timeout_seconds=SOCKET_TIMEOUT_SECONDS):
         request_headers = dict(headers or {})
         data = None
         if form is not None:
@@ -86,16 +121,16 @@ class PrivateTransport:
             request_headers["Content-Type"] = "application/x-www-form-urlencoded"
         elif json_body is not None:
             data = json.dumps(json_body).encode("utf-8")
-            request_headers["Content-Type"] = "application/vnd.api+json"
+            request_headers["Content-Type"] = JSON_API_CONTENT_TYPE
         try:
             request = Request(url, data=data, headers=request_headers, method=method)
             try:
-                response = self._opener.open(request, timeout=timeout)
+                response = self._opener.open(request, timeout=timeout_seconds)
             except HTTPError as error:
                 response = error
             with response:
-                body = response.read(MAX_RESPONSE + 1)
-                if len(body) > MAX_RESPONSE:
+                body = response.read(MAX_RESPONSE_BYTES + 1)
+                if len(body) > MAX_RESPONSE_BYTES:
                     raise NissanError("Nissan response is too large.")
                 return HttpResponse(response.code, dict(response.headers), body.decode("utf-8"))
         except (URLError, OSError, HTTPException, ValueError):
@@ -135,7 +170,7 @@ def _origin(url):
         parsed = urlsplit(url)
         if parsed.username or parsed.password or parsed.fragment or parsed.scheme != "https":
             return None
-        return parsed.hostname, parsed.port or 443
+        return parsed.hostname, parsed.port or DEFAULT_HTTPS_PORT
     except ValueError:
         return None
 
@@ -152,13 +187,13 @@ def _object(response):
 
 def _number(value, maximum=None):
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise NissanError("Nissan returned an invalid battery value.")
+        raise NissanError(INVALID_BATTERY_VALUE_MESSAGE)
     try:
         value = float(value)
     except OverflowError:
-        raise NissanError("Nissan returned an invalid battery value.") from None
+        raise NissanError(INVALID_BATTERY_VALUE_MESSAGE) from None
     if not math.isfinite(value) or value < 0 or (maximum is not None and value > maximum):
-        raise NissanError("Nissan returned an invalid battery value.")
+        raise NissanError(INVALID_BATTERY_VALUE_MESSAGE)
     return float(value)
 
 
@@ -169,35 +204,36 @@ class BatteryStatus:
     The battery timestamp does not describe the separate cockpit odometer.
     """
 
-    soc: float
-    timestamp: float
+    soc_percent: float
+    measurement_unix_seconds: float
     range_km: Optional[float] = None
     odometer_km: Optional[float] = None
 
 
-def parse_battery(body, now=None):
+def parse_battery(body, now_unix_seconds=None):
     """Require an actual, timezone-aware measurement time; never substitute now."""
     try:
         attributes = body["data"]["attributes"]
-        soc = _number(attributes["batteryLevel"], 100)
+        soc_percent = _number(attributes["batteryLevel"], MAX_SOC_PERCENT)
         raw_time = attributes["lastUpdateTime"]
         if not isinstance(raw_time, str):
             raise ValueError
         measured = datetime.fromisoformat(raw_time.replace("Z", "+00:00"))
         if measured.tzinfo is None or measured.utcoffset() is None:
             raise ValueError
-        timestamp = measured.timestamp()
-        if not math.isfinite(timestamp) or timestamp <= 0 or timestamp > (time.time() if now is None else now) + 300:
+        measurement_unix_seconds = measured.timestamp()
+        if not math.isfinite(measurement_unix_seconds) or measurement_unix_seconds <= 0 or measurement_unix_seconds > (
+                time.time() if now_unix_seconds is None else now_unix_seconds) + MAX_MEASUREMENT_FUTURE_SKEW_SECONDS:
             raise ValueError
-        distance = attributes.get("rangeHvacOn")
-        if distance is None:
-            distance = attributes.get("rangeHvacOff")
+        range_km = attributes.get("rangeHvacOn")
+        if range_km is None:
+            range_km = attributes.get("rangeHvacOff")
         # An unavailable optional range must not discard a valid SoC measurement.
         try:
-            distance = None if distance is None else _number(distance)
+            range_km = None if range_km is None else _number(range_km)
         except NissanError:
-            distance = None
-        return BatteryStatus(soc, timestamp, distance)
+            range_km = None
+        return BatteryStatus(soc_percent, measurement_unix_seconds, range_km)
     except (KeyError, TypeError, ValueError, AttributeError, OverflowError):
         raise NissanError("Nissan did not return a valid SoC with a measurement timestamp.") from None
 
@@ -223,87 +259,95 @@ class NissanClient:
     and clocks support synthetic tests; production requests use PrivateTransport.
     """
 
-    def __init__(self, user_id, password, vin=None, transport=None, clock=time.monotonic, wall_clock=time.time):
+    def __init__(self, user_id, password, vin=None, transport=None,
+                 monotonic_seconds=time.monotonic, unix_seconds=time.time):
         self._user = user_id
         self._password = password
         self._configured_vin = (vin or "").strip().upper()
         self._transport = transport if transport is not None else PrivateTransport()
-        self._clock = clock
-        self._wall_clock = wall_clock
+        self._monotonic_seconds = monotonic_seconds
+        self._unix_seconds = unix_seconds
         self._access_token = None
         self._refresh_token = None
-        self._expires_at = 0
+        self._expires_at_monotonic_seconds = 0
         self._user_id = None
         self._vin = None
-        self._retry_at = 0
-        self._provider_retry_at = 0
+        self._retry_at_monotonic_seconds = 0
+        self._provider_retry_at_monotonic_seconds = 0
         self._failed_queries = 0
         self._retry_error_type = NissanError
         self._retry_reason = ""
-        self._deadline = None
+        self._deadline_monotonic_seconds = None
         self.last_query = None
-        self._last_contact_at = None
-        self._last_success_at = None
-        self._last_measurement_at = None
-        self._request_started_at = None
+        self._last_contact_unix_seconds = None
+        self._last_success_unix_seconds = None
+        self._last_measurement_unix_seconds = None
+        self._request_started_unix_seconds = None
         self._request_count = 0
         self._http_status = None
         self._phase = "idle"
-        self._odometer_retry_at = 0
+        self._odometer_retry_at_monotonic_seconds = 0
         self._odometer_outcome = "not_requested"
         self._odometer_http_status = None
-        self._odometer_received_at = None
+        self._odometer_received_unix_seconds = None
 
     def _request(self, method, url, auth_request=False, **kwargs):
-        if _origin(url) not in {_origin(AUTH), _origin(BFF), _origin(USERS), _origin(CARS)}:
+        if _origin(url) not in {_origin(AUTH_BASE_URL), _origin(BFF_BASE_URL),
+                                _origin(USERS_BASE_URL), _origin(CARS_BASE_URL)}:
             raise NissanError("Unexpected Nissan request destination; request aborted.")
-        remaining = self._deadline - self._clock()
-        if remaining <= 0:
+        remaining_seconds = self._deadline_monotonic_seconds - self._monotonic_seconds()
+        if remaining_seconds <= 0:
             raise NissanError("Nissan query time limit exceeded.")
-        self._last_contact_at = self._wall_clock()
-        if self._request_started_at is None:
-            self._request_started_at = self._last_contact_at
+        self._last_contact_unix_seconds = self._unix_seconds()
+        if self._request_started_unix_seconds is None:
+            self._request_started_unix_seconds = self._last_contact_unix_seconds
         self._request_count += 1
         self._http_status = None
-        response = self._transport.request(method, url, timeout=min(10, remaining), **kwargs)
+        response = self._transport.request(method, url, timeout_seconds=min(
+            SOCKET_TIMEOUT_SECONDS, remaining_seconds), **kwargs)
         self._http_status = response.status
-        if response.status in (429, 503):
-            self._retry_at = self._clock() + self._retry_after(response)
+        if response.status in (HTTPStatus.TOO_MANY_REQUESTS, HTTPStatus.SERVICE_UNAVAILABLE):
+            self._retry_at_monotonic_seconds = self._monotonic_seconds() + self._retry_after(response)
             # Separate provider advice from the scheduled client's own error backoff.
-            provider_delay = self._retry_after(response, minimum=0, default=300 if response.status == 429 else 0)
-            self._provider_retry_at = self._clock() + provider_delay
-        if response.status == 429:
+            provider_delay_seconds = self._retry_after(
+                response, minimum_seconds=0,
+                default_seconds=(DEFAULT_RETRY_AFTER_SECONDS
+                                 if response.status == HTTPStatus.TOO_MANY_REQUESTS else 0))
+            self._provider_retry_at_monotonic_seconds = self._monotonic_seconds() + provider_delay_seconds
+        if response.status == HTTPStatus.TOO_MANY_REQUESTS:
             raise RateLimitError("Nissan is rate limiting requests. Please try again later.")
-        if response.status in (401, 403) or (auth_request and response.status == 400):
+        if response.status in (HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN) or (
+                auth_request and response.status == HTTPStatus.BAD_REQUEST):
             raise AuthenticationError("Nissan rejected the login or access authorization.")
-        if response.status >= 400:
+        if response.status >= HTTPStatus.BAD_REQUEST:
             raise NissanError("Nissan service returned an HTTP error ({}).".format(response.status))
         return response
 
-    def _retry_after(self, response, minimum=300, default=300):
+    def _retry_after(self, response, minimum_seconds=MIN_RETRY_AFTER_SECONDS,
+                     default_seconds=DEFAULT_RETRY_AFTER_SECONDS):
         """Accept delay seconds or an HTTP date; bound server-directed pauses."""
         value = next((v for k, v in response.headers.items() if k.lower() == "retry-after"), None)
         try:
-            delay = int(value)
+            delay_seconds = int(value)
         except (ValueError, TypeError, OverflowError):
             try:
-                deadline = parsedate_to_datetime(value)
-                if deadline.tzinfo is None:
+                retry_at_datetime = parsedate_to_datetime(value)
+                if retry_at_datetime.tzinfo is None:
                     raise ValueError
-                delay = deadline.timestamp() - self._wall_clock()
+                delay_seconds = retry_at_datetime.timestamp() - self._unix_seconds()
             except (ValueError, TypeError, AttributeError, OverflowError):
-                delay = default
-        return max(minimum, min(delay, 86400))
+                delay_seconds = default_seconds
+        return max(minimum_seconds, min(delay_seconds, MAX_RETRY_AFTER_SECONDS))
 
     def _json(self, method, url, **kwargs):
         response = self._request(method, url, **kwargs)
-        if not 200 <= response.status < 300:
+        if not HTTPStatus.OK <= response.status < HTTPStatus.MULTIPLE_CHOICES:
             raise NissanError("Unexpected redirect from the Nissan API.")
         return _object(response)
 
     def _redirects(self, response, url, callback=False):
-        for _ in range(10):
-            if response.status not in (301, 302, 303, 307, 308):
+        for _ in range(MAX_LOGIN_REDIRECTS):
+            if response.status not in REDIRECT_STATUSES:
                 return response, url
             location = next((v for k, v in response.headers.items() if k.lower() == "location"), None)
             if not isinstance(location, str) or not location:
@@ -312,13 +356,13 @@ class NissanClient:
                 target = urljoin(url, location)
                 parsed = urlsplit(target)
             except ValueError:
-                raise NissanError("Unexpected redirect during Nissan login.") from None
-            expected = urlsplit(CALLBACK)
+                raise NissanError(INVALID_LOGIN_REDIRECT_MESSAGE) from None
+            expected = urlsplit(OAUTH_CALLBACK_URI)
             if callback and (parsed.scheme, parsed.netloc, parsed.path) == (
                     expected.scheme, expected.netloc, expected.path) and not parsed.fragment:
                 return response, target
-            if _origin(target) != _origin(AUTH):
-                raise NissanError("Unexpected redirect during Nissan login.")
+            if _origin(target) != _origin(AUTH_BASE_URL):
+                raise NissanError(INVALID_LOGIN_REDIRECT_MESSAGE)
             response = self._request("GET", target)
             url = target
         raise NissanError("Too many or invalid Nissan redirects.")
@@ -331,13 +375,13 @@ class NissanClient:
         if hasattr(self._transport, "clear_cookies"):
             self._transport.clear_cookies()
         self._refresh_token = None
-        verifier = secrets.token_urlsafe(64)
+        verifier = secrets.token_urlsafe(PKCE_VERIFIER_RANDOM_BYTES)
         digest = hashlib.sha256(verifier.encode("ascii")).digest()
         challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
-        state = secrets.token_urlsafe(32)
-        url = AUTH + "oauth2/authorize?" + urlencode({
-            "response_type": "code", "redirect_uri": CALLBACK, "client_id": CLIENT_ID,
-            "state": state, "scope": SCOPE, "code_challenge": challenge, "code_challenge_method": "S256",
+        state = secrets.token_urlsafe(OAUTH_STATE_RANDOM_BYTES)
+        url = AUTH_BASE_URL + "oauth2/authorize?" + urlencode({
+            "response_type": "code", "redirect_uri": OAUTH_CALLBACK_URI, "client_id": OAUTH_CLIENT_ID,
+            "state": state, "scope": OAUTH_LOGIN_SCOPE, "code_challenge": challenge, "code_challenge_method": "S256",
             "locale": "en_GB", "brand": "Nissan", "client": "mynissanapp"})
         response, url = self._redirects(self._request("GET", url), url)
         form = _LoginForm.parse(response.body)
@@ -346,30 +390,32 @@ class NissanClient:
         try:
             target = urljoin(url, form["action"])
         except ValueError:
-            raise NissanError("Unexpected Nissan login form destination.") from None
-        if _origin(target) != _origin(AUTH):
-            raise NissanError("Unexpected Nissan login form destination.")
+            raise NissanError(INVALID_LOGIN_FORM_DESTINATION_MESSAGE) from None
+        if _origin(target) != _origin(AUTH_BASE_URL):
+            raise NissanError(INVALID_LOGIN_FORM_DESTINATION_MESSAGE)
         data = dict(form["inputs"])
         region = data.get("regionCode", "")
         data.update(userName=self._user, username=region + "/" + self._user if region else self._user,
                     password=self._password)
-        response = self._request("POST", target, form=data, headers={"Origin": AUTH.rstrip("/"), "Referer": url})
+        response = self._request("POST", target, form=data, headers={
+                                 "Origin": AUTH_BASE_URL.rstrip("/"), "Referer": url})
         response, callback = self._redirects(response, target, callback=True)
         parsed = urlsplit(callback)
-        if (parsed.scheme, parsed.netloc, parsed.path) != ("com", "wso2.service.nci", ""):
+        expected = urlsplit(OAUTH_CALLBACK_URI)
+        if (parsed.scheme, parsed.netloc, parsed.path) != (expected.scheme, expected.netloc, expected.path):
             raise AuthenticationError(
                 "Nissan login did not complete. Check your credentials and any notices in MyNISSAN.")
         values = parse_qs(parsed.query)
         if values.get("state") != [state] or len(values.get("code", [])) != 1 or values.get("error"):
             raise AuthenticationError("Nissan returned an invalid login confirmation.")
-        token = self._json("POST", AUTH + "oauth2/token", auth_request=True, form={
-            "grant_type": "authorization_code", "redirect_uri": CALLBACK, "client_id": CLIENT_ID,
-            "code": values["code"][0], "code_verifier": verifier, "scope": SCOPE})
+        token = self._json("POST", AUTH_BASE_URL + "oauth2/token", auth_request=True, form={
+            "grant_type": "authorization_code", "redirect_uri": OAUTH_CALLBACK_URI, "client_id": OAUTH_CLIENT_ID,
+            "code": values["code"][0], "code_verifier": verifier, "scope": OAUTH_LOGIN_SCOPE})
         identity_token = token.get("id_token")
         if not isinstance(identity_token, str) or not identity_token:
             raise AuthenticationError("Nissan did not return an identity token.")
-        self._install(self._json("POST", BFF + "v1/oauth2/access_token?platform=Android", auth_request=True,
-                                 headers={"Authorization": identity_token, "Content-Type": "application/vnd.api+json"}))
+        self._install(self._json("POST", BFF_BASE_URL + "v1/oauth2/access_token?platform=Android", auth_request=True,
+                                 headers={"Authorization": identity_token, "Content-Type": JSON_API_CONTENT_TYPE}))
 
     def _install(self, token):
         access = token.get("access_token")
@@ -377,52 +423,54 @@ class NissanClient:
         if not isinstance(access, str) or not access or (refresh is not None and not isinstance(refresh, str)):
             raise AuthenticationError("Nissan did not return a valid access token.")
         try:
-            expires = float(token.get("expires_in", 3600))
-            if not math.isfinite(expires) or expires <= 0:
+            expires_in_seconds = float(token.get("expires_in", DEFAULT_TOKEN_LIFETIME_SECONDS))
+            if not math.isfinite(expires_in_seconds) or expires_in_seconds <= 0:
                 raise ValueError
         except (ValueError, TypeError, OverflowError):
             raise AuthenticationError("Nissan returned an invalid token lifetime.") from None
         self._access_token = access
         self._refresh_token = refresh or self._refresh_token
-        self._expires_at = self._clock() + max(0, expires - 30)
+        self._expires_at_monotonic_seconds = (
+            self._monotonic_seconds() + max(0, expires_in_seconds - TOKEN_REFRESH_MARGIN_SECONDS))
 
     def _authenticate(self, force=False):
-        if self._access_token and not force and self._clock() < self._expires_at:
+        if self._access_token and not force and self._monotonic_seconds() < self._expires_at_monotonic_seconds:
             return
         if self._refresh_token:
             try:
-                self._install(self._json("POST", BFF + "v1/oauth2/refresh-token?platform=Android", auth_request=True,
+                self._install(self._json("POST", BFF_BASE_URL + "v1/oauth2/refresh-token?platform=Android",
+                                         auth_request=True,
                                          headers={"Authorization": self._refresh_token},
-                                         json_body={"scope": "openid profile vehicles"}))
+                                         json_body={"scope": OAUTH_REFRESH_SCOPE}))
                 return
             except AuthenticationError:
                 self._access_token = self._refresh_token = None
         self._login()
 
     def _get(self, url):
-        for attempt in range(2):
+        for attempt in range(MAX_AUTHENTICATED_REQUEST_ATTEMPTS):
             try:
                 return self._json("GET", url, headers={
-                    "Authorization": "Bearer " + self._access_token, "Content-Type": "application/vnd.api+json"})
+                    "Authorization": "Bearer " + self._access_token, "Content-Type": JSON_API_CONTENT_TYPE})
             except AuthenticationError:
                 if attempt:
                     raise
                 self._authenticate(force=True)
 
     def _select_vehicle(self):
-        if self._configured_vin and not re.fullmatch(r"[A-HJ-NPR-Z0-9]{17}", self._configured_vin):
+        if self._configured_vin and not re.fullmatch(VIN_PATTERN, self._configured_vin):
             raise NissanError("The configured VIN is invalid.")
         if not self._user_id:
-            user = self._get(USERS + "v1/users/current").get("userId")
+            user = self._get(USERS_BASE_URL + "v1/users/current").get("userId")
             if not isinstance(user, str) or not user:
                 raise NissanError("Nissan did not return a user identifier.")
             self._user_id = user
-        vehicles = self._get(BFF + "v5/users/" + quote(self._user_id, safe="") + "/cars").get("data")
+        vehicles = self._get(BFF_BASE_URL + "v5/users/" + quote(self._user_id, safe="") + "/cars").get("data")
         if not isinstance(vehicles, list):
             raise NissanError("Nissan did not return a vehicle list.")
         candidates = [v.get("vin", "").upper() for v in vehicles
                       if isinstance(v, dict) and isinstance(v.get("vin"), str)
-                      and re.fullmatch(r"[A-HJ-NPR-Z0-9]{17}", v["vin"].upper())]
+                      and re.fullmatch(VIN_PATTERN, v["vin"].upper())]
         if self._configured_vin:
             if self._configured_vin not in candidates:
                 raise NissanError("The configured VIN was not found in the Nissan account.")
@@ -440,65 +488,75 @@ class NissanClient:
         pauses still govern subsequent queries, including battery queries.
         Never reuse an old odometer as if it came from this response.
         """
-        if self._clock() < self._odometer_retry_at:
+        if self._monotonic_seconds() < self._odometer_retry_at_monotonic_seconds:
             self._odometer_outcome = "deferred"
             return None
         self._phase = "odometer"
         self._http_status = None
         try:
-            body = self._json("GET", CARS + "v1/cars/" + self._vin + "/cockpit", headers={
-                "Authorization": "Bearer " + self._access_token, "Content-Type": "application/vnd.api+json"})
-            value = parse_odometer(body)
-            self._odometer_outcome = "success" if value is not None else "unavailable"
-            if value is not None:
-                self._odometer_received_at = self._wall_clock()
-            return value
+            body = self._json("GET", CARS_BASE_URL + "v1/cars/" + self._vin + "/cockpit", headers={
+                "Authorization": "Bearer " + self._access_token, "Content-Type": JSON_API_CONTENT_TYPE})
+            odometer_km = parse_odometer(body)
+            self._odometer_outcome = "success" if odometer_km is not None else "unavailable"
+            if odometer_km is not None:
+                self._odometer_received_unix_seconds = self._unix_seconds()
+            return odometer_km
         except NissanError as error:
             self._odometer_outcome = "failed"
-            self._odometer_retry_at = self._clock() + 300
-            if isinstance(error, RateLimitError) or self._provider_retry_at > self._clock():
+            self._odometer_retry_at_monotonic_seconds = self._monotonic_seconds() + ODOMETER_FAILURE_BACKOFF_SECONDS
+            if (isinstance(error, RateLimitError)
+                    or self._provider_retry_at_monotonic_seconds > self._monotonic_seconds()):
                 self._retry_error_type = type(error)
                 self._retry_reason = "Nissan requested a pause after the optional odometer query."
             else:
                 # A cockpit-only outage must not suppress the next battery query.
-                self._retry_at = 0
+                self._retry_at_monotonic_seconds = 0
             return None
         finally:
             self._odometer_http_status = self._http_status
 
-    def _finish_query(self, outcome, started, result=None):
+    def _finish_query(self, outcome, started_monotonic_seconds, result=None):
         """Keep an allowlisted diagnostic summary, never raw transport data."""
-        completed = self._wall_clock()
+        completed_unix_seconds = self._unix_seconds()
         if result is not None:
-            self._last_success_at = completed
-            self._last_measurement_at = result.timestamp
+            self._last_success_unix_seconds = completed_unix_seconds
+            self._last_measurement_unix_seconds = result.measurement_unix_seconds
 
-        def iso(value):
-            return None if value is None else datetime.fromtimestamp(value, timezone.utc).isoformat()
+        def iso(unix_seconds):
+            return None if unix_seconds is None else datetime.fromtimestamp(unix_seconds, timezone.utc).isoformat()
 
         self.last_query = {
             "outcome": outcome,
             "phase": self._phase,
-            "request_started_at": iso(self._request_started_at),
-            "completed_at": iso(completed),
-            "duration_seconds": round(max(0, self._clock() - started), 3),
+            "request_started_at": iso(self._request_started_unix_seconds),
+            "completed_at": iso(completed_unix_seconds),
+            "duration_seconds": (
+                round(max(0, self._monotonic_seconds() - started_monotonic_seconds), DURATION_DECIMAL_PLACES)
+            ),
             "http_requests": self._request_count,
             "last_http_status": self._http_status,
-            "last_contact_at": iso(self._last_contact_at),
-            "last_success_at": iso(self._last_success_at),
-            "last_measurement_at": iso(self._last_measurement_at),
-            "measurement_at": iso(result.timestamp) if result else None,
-            "data_age_seconds": round(completed - result.timestamp, 1) if result else None,
-            "soc": result.soc if result else None,
+            "last_contact_at": iso(self._last_contact_unix_seconds),
+            "last_success_at": iso(self._last_success_unix_seconds),
+            "last_measurement_at": iso(self._last_measurement_unix_seconds),
+            "measurement_at": iso(result.measurement_unix_seconds) if result else None,
+            "data_age_seconds": (
+                round(completed_unix_seconds - result.measurement_unix_seconds,
+                      DATA_AGE_DECIMAL_PLACES) if result else None
+            ),
+            "soc": result.soc_percent if result else None,
             "range_km": result.range_km if result else None,
             "odometer_km": result.odometer_km if result else None,
             "odometer_outcome": self._odometer_outcome,
             "odometer_http_status": self._odometer_http_status,
-            "odometer_retry_after_seconds": max(0, math.ceil(self._odometer_retry_at - self._clock())),
-            "odometer_received_at": iso(self._odometer_received_at),
-            "retry_after_seconds": max(0, math.ceil(self._retry_at - self._clock())),
-            "provider_retry_after_seconds": max(0, math.ceil(self._provider_retry_at - self._clock())),
-            "source": "nissan_cached_api",
+            "odometer_retry_after_seconds": (
+                max(0, math.ceil(self._odometer_retry_at_monotonic_seconds - self._monotonic_seconds()))
+            ),
+            "odometer_received_at": iso(self._odometer_received_unix_seconds),
+            "retry_after_seconds": max(0, math.ceil(self._retry_at_monotonic_seconds - self._monotonic_seconds())),
+            "provider_retry_after_seconds": (
+                max(0, math.ceil(self._provider_retry_at_monotonic_seconds - self._monotonic_seconds()))
+            ),
+            "source": DIAGNOSTIC_SOURCE,
         }
 
     def fetch_battery(self, include_odometer=False):
@@ -511,20 +569,20 @@ class NissanClient:
         include_odometer adds one best-effort cockpit GET after battery success;
         callers serving openWB and private tests enable it explicitly.
         """
-        started = self._clock()
-        self._request_started_at = None
+        started_monotonic_seconds = self._monotonic_seconds()
+        self._request_started_unix_seconds = None
         self._request_count = 0
         self._http_status = None
         self._phase = "idle"
         self._odometer_outcome = "not_requested"
         self._odometer_http_status = None
-        self._odometer_received_at = None
-        if started < self._retry_at:
-            remaining = math.ceil(self._retry_at - started)
-            self._finish_query("deferred", started)
+        self._odometer_received_unix_seconds = None
+        if started_monotonic_seconds < self._retry_at_monotonic_seconds:
+            remaining_seconds = math.ceil(self._retry_at_monotonic_seconds - started_monotonic_seconds)
+            self._finish_query("deferred", started_monotonic_seconds)
             raise self._retry_error_type(
-                "Nissan requests are paused for {} more seconds. {}".format(remaining, self._retry_reason))
-        self._deadline = started + 60
+                "Nissan requests are paused for {} more seconds. {}".format(remaining_seconds, self._retry_reason))
+        self._deadline_monotonic_seconds = started_monotonic_seconds + QUERY_BUDGET_SECONDS
         result = None
         outcome = "failed"
         try:
@@ -534,11 +592,11 @@ class NissanClient:
                 self._phase = "vehicle_selection"
                 self._select_vehicle()
             self._phase = "battery"
-            body = self._get(CARS + "v1/cars/" + self._vin + "/battery-status")
-            result = parse_battery(body, now=self._wall_clock())
+            body = self._get(CARS_BASE_URL + "v1/cars/" + self._vin + "/battery-status")
+            result = parse_battery(body, now_unix_seconds=self._unix_seconds())
             self._failed_queries = 0
-            self._retry_at = 0
-            self._provider_retry_at = 0
+            self._retry_at_monotonic_seconds = 0
+            self._provider_retry_at_monotonic_seconds = 0
             self._retry_error_type = NissanError
             self._retry_reason = ""
             if include_odometer:
@@ -551,12 +609,15 @@ class NissanClient:
                 self._user_id = self._vin = None
             # Do not sleep in an openWB worker or retain exception tracebacks.
             # A successful query resets this backoff; deferred calls do not extend it.
-            self._failed_queries = min(self._failed_queries + 1, 5)
-            delay = min(300 * 2 ** (self._failed_queries - 1), 3600)
-            self._retry_at = max(self._retry_at, self._clock() + delay)
+            self._failed_queries = min(self._failed_queries + 1, MAX_FAILURE_BACKOFF_STEPS)
+            delay_seconds = min(
+                INITIAL_FAILURE_BACKOFF_SECONDS * FAILURE_BACKOFF_MULTIPLIER ** (self._failed_queries - 1),
+                MAX_FAILURE_BACKOFF_SECONDS)
+            self._retry_at_monotonic_seconds = max(
+                self._retry_at_monotonic_seconds, self._monotonic_seconds() + delay_seconds)
             self._retry_error_type = type(error)
             self._retry_reason = str(error)
             raise
         finally:
-            self._deadline = None
-            self._finish_query(outcome, started, result)
+            self._deadline_monotonic_seconds = None
+            self._finish_query(outcome, started_monotonic_seconds, result)

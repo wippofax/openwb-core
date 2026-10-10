@@ -8,9 +8,9 @@ Nissan and does not wake the vehicle; a successful request can return old data.
 integration. Specific permission for this app-API access has not been
 established. Nissan's account and service terms are separate from this code's
 open-source license; the experimental label does not resolve that question.
-Login or API changes can interrupt operation. See the dated
-[service-terms review](license-review.md#nissan-service-access-bp-terms-01-open)
-and [Nissan's terms](https://www.nissan.de/rechtliches/agb.html).
+Login or API changes can interrupt operation. Consult the terms applicable
+to your account; [Nissan's terms index](https://www.nissan.de/rechtliches/agb.html)
+provides the published German service terms.
 
 **Account data.** The browser sends entered details to your wallbox; it contacts
 the Nissan login/data services over HTTPS. Saving settings stores credentials

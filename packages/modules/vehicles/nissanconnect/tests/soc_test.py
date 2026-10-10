@@ -42,8 +42,12 @@ def test_openwb_adapter_preserves_timestamp_reuses_client_and_handles_config_cha
     config.configuration.password = "synthetic-new-password"
     updater(None)
     assert factory.call_count == 2
+    assert factory.call_args_list[0].kwargs["request_counter"] is factory.call_args_list[1].kwargs["request_counter"]
+    soc.create_vehicle(config, 8)
+    wrapper.call_args.kwargs["component_updater"](None)
+    assert factory.call_args.kwargs["request_counter"] is not factory.call_args_list[0].kwargs["request_counter"]
     assert wrapper.call_args.kwargs["calc_while_charging"] is False
-    assert wrapper.call_args.kwargs["vehicle"] == 7
+    assert wrapper.call_args_list[0].kwargs["vehicle"] == 7
 
 
 def test_configuration_descriptor_and_module_name_agree(soc_module):
@@ -75,7 +79,11 @@ def test_module_logs_only_allowlisted_diagnostics(monkeypatch, soc_module, caplo
     client, transport, _ = make_client(full_script() + [reply({"data": {"attributes": {"totalMileage": 12345.6}}})])
     wrapper = Mock()
     monkeypatch.setattr(soc_module, "ConfigurableVehicle", wrapper)
-    monkeypatch.setattr(soc_module, "NissanClient", lambda *args: client)
+
+    def create_client(*args, **kwargs):
+        client._request_counter = kwargs["request_counter"]
+        return client
+    monkeypatch.setattr(soc_module, "NissanClient", create_client)
     config = NissanConnect(configuration=NissanConnectConfiguration("synthetic@example.invalid", "synthetic-password"))
     soc_module.create_vehicle(config, 7)
     updater = wrapper.call_args.kwargs["component_updater"]
@@ -84,6 +92,11 @@ def test_module_logs_only_allowlisted_diagnostics(monkeypatch, soc_module, caplo
     assert len(caplog.records) == 1
     assert '"outcome": "success"' in caplog.text and '"data_age_seconds": 86400' in caplog.text
     assert '"soc": 47.0' in caplog.text and 'Nissan vehicle 7' in caplog.text
+    summary = json.loads(caplog.records[0].args[1])
+    assert summary["http_requests_last_24h"] == 8
+    assert summary["http_requests_since_start"] == 8
+    assert summary["http_requests_since_midnight"] == 8
+    assert summary["http_requests_last_24h_complete"] is False
     for value in (VIN, "example.invalid", "synthetic-password", "synthetic-access", "synthetic-refresh"):
         assert value not in caplog.text
     assert not any(record.exc_info for record in caplog.records)
@@ -96,4 +109,8 @@ def test_module_logs_only_allowlisted_diagnostics(monkeypatch, soc_module, caplo
         updater(None)
     assert len(transport.calls) == calls
     assert '"outcome": "deferred"' in caplog.records[-1].getMessage()
-    assert json.loads(caplog.records[-1].args[1])["request_started_at"] is None
+    deferred = json.loads(caplog.records[-1].args[1])
+    assert deferred["request_started_at"] is None
+    assert deferred["http_requests"] == 0
+    assert deferred["http_requests_last_24h"] == 8
+    assert deferred["http_requests_since_start"] == 8

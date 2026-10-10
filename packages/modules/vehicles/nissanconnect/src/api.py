@@ -1,10 +1,11 @@
 """MyNISSAN EU/OneID client. Cached battery/odometer data; no vehicle commands.
 
 Protocol adapted from HomeAssistant-NissanConnect; see NOTICE.md for attribution.
-Adapted for openWB by phelix, 2026-09-11 through 2026-10-02, under GPLv3.
+Adapted for openWB by wippofax, 2026-09-11 through 2026-10-10, under GPLv3.
 Credentials, cookies and tokens stay in memory. Never log transport payloads.
 """
 import base64
+from collections import deque
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
@@ -56,6 +57,9 @@ ODOMETER_FAILURE_BACKOFF_SECONDS = 300
 MAX_SOC_PERCENT = 100
 DURATION_DECIMAL_PLACES = 3
 DATA_AGE_DECIMAL_PLACES = 1
+REQUEST_COUNTER_WINDOW_SECONDS = 24 * 60 * 60
+REQUEST_COUNTER_CLOCK_SKEW_SECONDS = 5
+MAX_REQUEST_COUNTER_EVENTS = 100000
 
 PKCE_VERIFIER_RANDOM_BYTES = 64
 OAUTH_STATE_RANDOM_BYTES = 32
@@ -68,6 +72,77 @@ INVALID_LOGIN_REDIRECT_MESSAGE = "Unexpected redirect during Nissan login."
 INVALID_LOGIN_FORM_DESTINATION_MESSAGE = "Unexpected Nissan login form destination."
 REDIRECT_STATUSES = (HTTPStatus.MOVED_PERMANENTLY, HTTPStatus.FOUND, HTTPStatus.SEE_OTHER,
                      HTTPStatus.TEMPORARY_REDIRECT, HTTPStatus.PERMANENT_REDIRECT)
+
+
+class RequestCounter:
+    """In-memory request history owned by one native vehicle module instance.
+
+    Store timestamps and a cumulative count, never account or vehicle identifiers.
+    The cumulative count survives expiry of individual request timestamps.
+    Monotonic time defines the rolling window; local calendar time defines the
+    current day, which may last 23 or 25 hours. Keep an event while either window
+    needs it. Resets expose a new coverage start instead of claiming a full day.
+    The ordinary vehicle updater serializes access; no cross-process sharing.
+    """
+
+    def __init__(self):
+        self._events = deque()
+        self._requests_since_start_count = 0
+        self._started_monotonic_seconds = None
+        self._started_unix_seconds = None
+        self._last_monotonic_seconds = None
+        self._reset_reason = "module_started"
+
+    def _reset(self, monotonic_seconds, unix_seconds, reason):
+        self._events.clear()
+        self._requests_since_start_count = 0
+        self._started_monotonic_seconds = monotonic_seconds
+        self._started_unix_seconds = unix_seconds
+        self._reset_reason = reason
+
+    def observe(self, monotonic_seconds, unix_seconds):
+        """Advance coverage and expiry even when backoff sends no request."""
+        if self._started_monotonic_seconds is None:
+            self._reset(monotonic_seconds, unix_seconds, "module_started")
+        elif (monotonic_seconds < self._last_monotonic_seconds or abs(
+                (unix_seconds - self._started_unix_seconds) -
+                (monotonic_seconds - self._started_monotonic_seconds)) > REQUEST_COUNTER_CLOCK_SKEW_SECONDS):
+            self._reset(monotonic_seconds, unix_seconds, "clock_changed")
+        self._last_monotonic_seconds = monotonic_seconds
+        # A naive local midnight is converted using that date's system timezone
+        # rules, not the current fixed UTC offset (which can differ after DST).
+        midnight = datetime.fromtimestamp(unix_seconds).replace(hour=0, minute=0, second=0, microsecond=0, fold=0)
+        midnight_unix_seconds = midnight.timestamp()
+        cutoff_monotonic_seconds = monotonic_seconds - REQUEST_COUNTER_WINDOW_SECONDS
+        while (self._events and self._events[0][0] <= cutoff_monotonic_seconds
+               and self._events[0][1] < midnight_unix_seconds):
+            self._events.popleft()
+        return midnight
+
+    def record(self, monotonic_seconds, unix_seconds):
+        """Count immediately before transport, including requests that fail."""
+        self.observe(monotonic_seconds, unix_seconds)
+        if len(self._events) >= MAX_REQUEST_COUNTER_EVENTS:
+            # Bound memory without silently truncating an allegedly complete sum.
+            self._reset(monotonic_seconds, unix_seconds, "capacity_limit")
+        self._events.append((monotonic_seconds, unix_seconds))
+        self._requests_since_start_count += 1
+
+    def snapshot(self, monotonic_seconds, unix_seconds):
+        midnight = self.observe(monotonic_seconds, unix_seconds)
+        midnight_unix_seconds = midnight.timestamp()
+        cutoff_monotonic_seconds = monotonic_seconds - REQUEST_COUNTER_WINDOW_SECONDS
+        return {
+            "http_requests_last_24h": sum(event[0] > cutoff_monotonic_seconds for event in self._events),
+            "http_requests_since_midnight": sum(event[1] >= midnight_unix_seconds for event in self._events),
+            "http_requests_since_start": self._requests_since_start_count,
+            "http_requests_counting_since": datetime.fromtimestamp(
+                self._started_unix_seconds, timezone.utc).isoformat(),
+            "http_requests_local_midnight": midnight.astimezone().isoformat(),
+            "http_requests_last_24h_complete": self._started_monotonic_seconds <= cutoff_monotonic_seconds,
+            "http_requests_since_midnight_complete": self._started_unix_seconds < midnight_unix_seconds,
+            "http_requests_counter_reset_reason": self._reset_reason,
+        }
 
 
 class NissanError(Exception):
@@ -260,13 +335,14 @@ class NissanClient:
     """
 
     def __init__(self, user_id, password, vin=None, transport=None,
-                 monotonic_seconds=time.monotonic, unix_seconds=time.time):
+                 monotonic_seconds=time.monotonic, unix_seconds=time.time, request_counter=None):
         self._user = user_id
         self._password = password
         self._configured_vin = (vin or "").strip().upper()
         self._transport = transport if transport is not None else PrivateTransport()
         self._monotonic_seconds = monotonic_seconds
         self._unix_seconds = unix_seconds
+        self._request_counter = request_counter
         self._access_token = None
         self._refresh_token = None
         self._expires_at_monotonic_seconds = 0
@@ -302,6 +378,8 @@ class NissanClient:
         if self._request_started_unix_seconds is None:
             self._request_started_unix_seconds = self._last_contact_unix_seconds
         self._request_count += 1
+        if self._request_counter is not None:
+            self._request_counter.record(self._monotonic_seconds(), self._last_contact_unix_seconds)
         self._http_status = None
         response = self._transport.request(method, url, timeout_seconds=min(
             SOCKET_TIMEOUT_SECONDS, remaining_seconds), **kwargs)
@@ -558,6 +636,8 @@ class NissanClient:
             ),
             "source": DIAGNOSTIC_SOURCE,
         }
+        if self._request_counter is not None:
+            self.last_query.update(self._request_counter.snapshot(self._monotonic_seconds(), completed_unix_seconds))
 
     def fetch_battery(self, include_odometer=False):
         """Return cached battery data or raise NissanError; never issue wake commands.
@@ -570,6 +650,8 @@ class NissanClient:
         callers serving openWB and private tests enable it explicitly.
         """
         started_monotonic_seconds = self._monotonic_seconds()
+        if self._request_counter is not None:
+            self._request_counter.observe(started_monotonic_seconds, self._unix_seconds())
         self._request_started_unix_seconds = None
         self._request_count = 0
         self._http_status = None

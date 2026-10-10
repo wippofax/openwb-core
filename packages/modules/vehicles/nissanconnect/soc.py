@@ -6,7 +6,7 @@ from modules.common.abstract_device import DeviceDescriptor
 from modules.common.abstract_vehicle import VehicleUpdateData
 from modules.common.component_state import CarState
 from modules.common.configurable_vehicle import ConfigurableVehicle
-from modules.vehicles.nissanconnect.src.api import NissanClient
+from modules.vehicles.nissanconnect.src.api import NissanClient, RequestCounter
 from modules.vehicles.nissanconnect.config import NissanConnect
 
 
@@ -17,6 +17,9 @@ def create_vehicle(vehicle_config: NissanConnect, vehicle: int):
     """Keep one client per configuration; delegate scheduling/error policy to Core."""
     client = None
     configuration_key = None
+    # Per configured vehicle, including client replacement after edited credentials.
+    # Restart/recreation discards history; no file, MQTT topic or Core state is added.
+    request_counter = RequestCounter()
 
     def updater(vehicle_update_data: VehicleUpdateData) -> CarState:
         nonlocal client, configuration_key
@@ -24,7 +27,7 @@ def create_vehicle(vehicle_config: NissanConnect, vehicle: int):
         current = (config.user_id, config.password, config.vin)
         # Keep tokens between updates; discard them when the account/vehicle changes.
         if client is None or current != configuration_key:
-            client = NissanClient(*current)
+            client = NissanClient(*current, request_counter=request_counter)
             configuration_key = current
         try:
             battery = client.fetch_battery(include_odometer=True)

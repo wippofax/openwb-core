@@ -1,221 +1,197 @@
-# Query diagnostics and settings connection test
+# Query diagnostics, errors and connection tests
 
-## Regular SoC queries
+## Requests, measurements and scheduling
 
-The Nissan adapter emits one DEBUG record per updater invocation using the
-existing openWB logger. The normal SoC logging context routes these records to
-`soc.log`; the existing SoC log level must permit DEBUG. No separate log file or
-global logging configuration is introduced. The standalone private probe and
-settings worker do not emit these records.
+The module reads cached Nissan data; it sends no wakeup, refresh or charging
+commands. Core calls the updater according to its ordinary vehicle settings
+or a manual SoC refresh. A scheduled invocation can be deferred by client
+backoff without making an HTTP request.
 
-The JSON summary deliberately includes only these diagnostic fields:
+In the inspected openWB 2.2.3 Core (`3ced7f9cef3c70980ee1fab670f0d0717d1809ca`):
+
+- Status displays `soc_timestamp`, set from Nissan's battery measurement time.
+  It need not change after a successful query and is independent of percentage changes.
+- `soc_request_timestamp` records a Core updater attempt, not proof of an HTTP request.
+- Switching modules does not reset that request timestamp or force an immediate
+  query. Normal scheduling applies the currently saved interval to it.
+- Manual refresh bypasses the scheduler interval, but not the client's retry
+  delay or Core's measurement timestamp guard.
+- Core rejects a measurement more than 60 seconds older than its stored value,
+  logging `Not updating SoC, because timestamp is older.` at DEBUG. A recent
+  manual value can therefore remain visible after successful Nissan retrieval.
+
+These source-level behaviors do not identify the cause of a particular private
+trial. Later Core versions may differ; the module does not replace these policies.
+
+## Scheduled-query diagnostics
+
+Each updater invocation emits one JSON summary at DEBUG through the existing
+SoC logger (`soc.log` when that context permits DEBUG). The standalone probe
+and settings worker do not write these scheduled-query records.
 
 | Fields | Meaning |
 | --- | --- |
-| `outcome`, `phase` | Success, failure or deferred call; authentication, vehicle selection, battery, odometer or idle phase |
-| `request_started_at` | Start of the first actual HTTP transport attempt in this invocation; null if deferred |
-| `completed_at`, `duration_seconds` | Invocation completion time and monotonic elapsed duration |
-| `http_requests`, `last_http_status` | Attempt count and most recent response status, when available |
-| `last_contact_at` | Most recent HTTP transport attempt, including failed attempts; preserved during backoff |
-| `last_success_at` | Most recent successful battery query, preserved after failure |
-| `measurement_at`, `data_age_seconds` | Nissan's original measurement time and its age at completion, for a successful result |
-| `last_measurement_at` | Original measurement time from the most recent successful battery query |
-| `soc`, `range_km` | Battery percentage and optional range accepted by the client parser; null when the client has no valid result |
-| `odometer_km`, `odometer_outcome` | Optional total kilometres and success/unavailable/failed/deferred/not_requested status; overall success still means a valid battery result |
-| `odometer_http_status`, `odometer_retry_after_seconds` | Optional endpoint response status and its separate remaining pause |
-| `odometer_received_at` | Reception time for a valid odometer, not its unknown measurement time; null otherwise |
-| `retry_after_seconds` | Remaining client pause; zero when no pause applies |
-| `provider_retry_after_seconds` | Separate remaining provider advice; excludes the scheduled client's local error pause |
-| `source` | `nissan_cached_api`, identifying passive server data |
+| `outcome`, `phase` | Success, failure or deferred invocation; current query phase |
+| `request_started_at` | First actual HTTP attempt in this invocation; null when deferred |
+| `completed_at`, `duration_seconds` | Completion time and elapsed monotonic seconds |
+| `http_requests`, `last_http_status` | HTTP attempts in this invocation (including login/token requests and failed attempts), and latest response status if available |
+| `http_requests_last_24h` | Request attempts in the rolling preceding 24 hours, for this vehicle module instance |
+| `http_requests_since_midnight` | Request attempts since 00:00 in the wallbox's local timezone, for this vehicle module instance |
+| `http_requests_since_start` | Total request attempts since `http_requests_counting_since`, including attempts older than 24 hours |
+| `http_requests_counting_since` | UTC timestamp at which the current counting period started |
+| `http_requests_local_midnight` | Current day's local midnight, including its UTC offset |
+| `http_requests_last_24h_complete`, `http_requests_since_midnight_complete` | Whether observation covers the entire respective window |
+| `http_requests_counter_reset_reason` | Why the current observation period started: `module_started`, `clock_changed` or `capacity_limit` |
+| `last_contact_at` | Latest actual HTTP attempt, including failures; retained during backoff |
+| `last_success_at` | Latest successful battery query, retained after failure |
+| `measurement_at`, `data_age_seconds` | Original battery measurement and its age at completion |
+| `last_measurement_at` | Measurement time from the latest successful battery query |
+| `soc`, `range_km` | Parsed battery percentage and optional range; null without valid battery data |
+| `odometer_km`, `odometer_outcome` | Total kilometres when available and success/unavailable/failed/deferred/not_requested status |
+| `odometer_http_status`, `odometer_retry_after_seconds` | Odometer endpoint status when available and remaining separate pause |
+| `odometer_received_at` | Reception time of a valid odometer; its measurement time is unknown |
+| `retry_after_seconds` | Remaining client pause |
+| `provider_retry_after_seconds` | Remaining provider advice, excluding the client's own error backoff |
+| `source` | `nissan_cached_api` |
 
-Times are ISO 8601 UTC. A deferred call has zero HTTP requests, no new request
-start and unchanged last-contact/last-success times. Recent retrieval does not
-make an old measurement fresh. A small negative age can expose clock skew;
-measurements more than five minutes ahead are already rejected by the parser.
-Authentication is reused within the normal module client, so an update need not
-repeat every login request.
+Times are ISO 8601 UTC, except `http_requests_local_midnight`, which includes
+the wallbox-local UTC offset. A deferred invocation has zero HTTP requests and no new
+request start. A small negative data age can indicate clock skew. `outcome=success`
+means the client retrieved valid battery data, before Core decides whether to
+accept the returned state. Odometer reception time never substitutes for battery
+or odometer measurement time.
 
-These logs describe Nissan retrieval, not the SoC subsequently calculated by the
-shared openWB wrapper. They do not change scheduler timestamps, fallback, error
-counters or charging policy. See [error handling](error-handling.md).
+Module summaries exclude usernames, passwords, VINs, tokens, cookies, URLs, raw
+responses and transport exceptions. Vehicle values and times remain private;
+see the separate [inherited logging limitation](privacy.md#logs-and-retention).
 
-In the pinned 2.2.3 Core, the Status card displays `soc_timestamp`, which this
-module sets to Nissan's measurement time. It is independent of percentage
-changes. Core's `soc_request_timestamp` records an updater attempt before it
-runs; it does not itself prove that an HTTP request was sent. Use
-`request_started_at` and `measurement_at` to distinguish the two times.
+## Rolling and daily request totals
 
-The module emits `outcome=success` before the shared wrapper decides whether
-to store the returned value. That wrapper rejects a measurement more than
-60 seconds older than the previously stored one and logs
-`Not updating SoC, because timestamp is older.` at DEBUG. A recent manual
-entry can therefore remain displayed after a successful cached Nissan query.
-The module deliberately preserves the real measurement time.
+Search scheduled SoC DEBUG logs for `http_requests_last_24h` and
+`http_requests_since_midnight`; `http_requests_since_start` gives the cumulative
+total since the timestamp in `http_requests_counting_since`. This total keeps
+growing across midnights and when requests expire from the rolling window.
+The totals count each HTTP attempt immediately
+before transport, including login, token renewal, vehicle selection, battery,
+odometer and failed attempts. A paused invocation adds no request. An attempt is
+not proof that the server received it. Totals are updated even while DEBUG is
+disabled and are reported when the next updater invocation is logged.
 
-Saving a different module does not force an immediate first query or reset the
-vehicle's existing request timestamp. Normal scheduling applies the currently
-saved interval to that timestamp; reducing the interval does not retain a
-separate timer for the old interval. A normal manual refresh bypasses the
-scheduler interval, while client retry delays and the timestamp guard still
-apply. These mechanisms do not prove the cause of any particular past trial.
+History belongs to one configured vehicle's module instance. Automatic updates
+and the normal manual SoC refresh share it; a replacement API client within that
+instance keeps the history. Other vehicles, the MyNISSAN app, private probes and
+the separately executed settings connection tests are excluded. These are not
+account-wide provider statistics; the settings test still shows only its own
+`http_requests` count.
 
-Username, password, VIN, tokens, cookies, URLs, raw bodies and transport exception
-messages are excluded. Battery values and times can still reveal vehicle usage:
-keep real logs private, and do not copy them into Git, issue reports or cloud
-agent sessions without a separately considered disclosure decision.
+Request timestamps and a cumulative count are retained in memory; no new file
+or MQTT topic is created. Restarting or recreating the vehicle module resets
+history and the cumulative count together with their start timestamp. The
+`http_requests_counting_since` value identifies the observed period and each
+`*_complete` flag remains false until its full window has been observed. A zero
+with incomplete coverage is not a claim that no earlier requests occurred.
 
-## Test from the settings page
+The rolling window uses elapsed monotonic seconds and excludes events exactly
+24 hours old. The daily window starts at local midnight, including on 23-hour
+and 25-hour days. A system-clock correction exceeding five seconds or a backward
+monotonic clock starts a new observation period. A 100,000-event memory bound
+also resets coverage explicitly instead of silently dropping counted history.
+Each reset restarts the cumulative count and its start timestamp together.
+The reset reason remains visible. These diagnostics do not change polling,
+backoff, charging control or Nissan rate limits.
 
-The Nissan page's **Test connection** button uses the currently entered username,
-password and optional VIN, including unsaved edits. It starts one passive battery
-query, including the login and selection requests it requires. The result shows
-SoC, optional range/odometer, query start, completion, battery measurement time and battery data
-age. Times use the browser's local time zone. Age continues to increase while the
-result is visible. The result is cleared when the input changes or the component
-is closed. An in-flight request finishes so its original account's cooldown can
-be retained; its displayed result is discarded after an input change.
+## Validation, retries and Core fallback
 
-The test does not save configuration, publish MQTT values, update charging
-control, wake the vehicle or issue vehicle commands. The ordinary Save operation
-retains its normal behavior. A success proves retrieval of valid stored battery
-data, not that the vehicle is awake or that the data was measured just now.
+SoC must be finite and within 0–100%; a genuine zero is valid. Battery time must
+include a timezone, be positive and be no more than five minutes ahead of the
+local clock. Invalid required fields fail; missing or invalid range/odometer
+values remain unavailable rather than being fabricated or copied from an earlier
+response. Their absence does not invalidate a valid battery result.
 
-The UI posts JSON to the module-owned endpoint
-`web/settings/modules/vehicles/nissanconnect/test_connection.php`. The settings
-repository owns its sources in `public/modules/vehicles/nissanconnect/` and
-delivers both PHP files through the regular UI build. Its helper
-`connection_test_lib.php` requires PHP 7.4 or newer with `proc_open`; deployment
-expects Linux and `/usr/bin/python3` with Python 3.9 or newer. The worker is
-`packages/modules/vehicles/nissanconnect/connection_test.py`. All three backend
-files must accompany the Python module and matching settings build. A UI-only
-installation cannot run the test. No shared Core handler is modified.
+The transport verifies HTTPS certificates, restricts destinations and redirects,
+and limits each response to 1 MiB. Socket timeouts are at most ten seconds;
+no new request starts after a 60-second query budget. This is not a hard deadline
+for a socket operation already running. Tokens are reused in memory; changing
+account configuration or restarting the module creates a new client.
 
-The endpoint requires same-origin JSON POST requests and inherits the settings
-web server's access policy. Origin validation is not authentication. It expects
-the web server to report the actual scheme and host; reverse-proxy setups must
-preserve that relationship. The browser-to-wallbox connection uses the existing
-settings transport. The worker-to-Nissan connection verifies HTTPS certificates.
+Failed battery queries use pauses of 5, 10, 20, 40 and then at most 60 minutes.
+Success resets that sequence. HTTP 429/503 honor `Retry-After` in seconds or
+HTTP-date form, bounded to 5 minutes through 24 hours for the scheduled client.
+Deferred invocations make no HTTP request and do not extend the pause. Actual
+retry time also depends on Core's polling interval. Authorization failure clears
+rejected tokens; ordinary service/network failures retain authentication for reuse.
 
-Credentials travel in the POST body and then through worker stdin, never in
-process arguments, shell interpolation, module files or module logs. Responses
-use `no-store`; worker stderr is discarded, and failures expose fixed error codes
-and bounded messages. The worker refuses recognizable cloud-agent environments,
-but that precaution cannot detect screen sharing, browser recording or every
-agent. Run live tests privately, outside agents, and keep the results private.
+After valid battery data, the module automatically attempts to read
+`totalMileage` from the cockpit endpoint using the same token and request budget,
+subject to retry pauses. Users do not need to enable a separate odometer option.
+Only data availability is conditional: unavailable or invalid mileage and query
+errors leave the successful battery result usable. Odometer endpoint errors pause
+that endpoint for five minutes without forcing a second login. Provider rate-limit
+advice can also defer subsequent requests.
 
-At most one settings test runs at a time. A complete successful battery result
-starts a five-minute pause for that account, measured from completion; zero SoC
-counts as success. A different account can be tested immediately. Returning to
-the first account retains its pause, including after password or VIN changes.
-An authentication failure, incomplete battery result or other ordinary failure
-allows an immediate retry. A busy response creates no cooldown.
+The existing Core wrapper may calculate SoC from metered charging energy after
+failed or stale API data when its required inputs are available. This depends on
+connection state, previous SoC, meter readings, battery capacity and efficiency;
+the pinned fallback also treats a previous zero SoC as absent. If fallback fails,
+normal Core fault handling applies. In the pinned version, three consecutive
+failed updates lead to publication of zero before the next update; deferred
+client calls can count as failed updates without being HTTP requests. Zero does
+not mean unknown to the charge-limit logic, so an API failure does not guarantee
+charging stops at the intended SoC target. The module neither suppresses errors
+nor changes that policy, and exposes no separate `calculate_soc` setting.
 
-Provider restrictions are independent. HTTP 429 without usable Retry-After
-defaults to five minutes; valid Retry-After advice on HTTP 429/503 is bounded to
-24 hours. HTTP 503 without usable advice adds no manual-test pause. Since these
-responses do not establish an account-only scope, the endpoint conservatively
-holds provider advice across accounts. Changing accounts cannot bypass it.
-The scheduled SoC client's existing error backoff is unchanged and independent.
+## Settings connection test
 
-The private temporary directory `openwb-nissanconnect-test` stores a bounded
-state file with expiry times, a random local HMAC key and keyed digests of
-normalized account names. It contains no raw username, password, VIN or vehicle
-response. The digests remain account-related: a party holding the state and
-its key can check candidate account names against them, so keep this state
-private too. Expired account entries are pruned in memory when state is loaded;
-the next successful state write persists that pruning. An early cooldown/error
-return can leave expired records on disk. There is no five-minute file-deletion
-timer. Failure to persist state prevents a query. The browser retains account countdowns only
-in component memory; after a reload or in another tab, the server remains
-authoritative and reports any applicable delay when a test is requested.
+**Test connection** uses current form values without saving them or publishing
+results to MQTT/charging control. It displays selected battery/odometer values,
+query times, original battery time and battery data age in the browser's timezone.
+The result also shows **Nissan HTTP requests (this test)** from `http_requests`,
+including authentication, vehicle selection, battery and odometer attempts.
+Failed attempts count too; this is not proof that Nissan received every request.
+The count is shown on success and failure when available. Missing or invalid
+counts and interrupted responses show **Not available**, never an assumed zero.
+This is a per-test count, not a persistent total across tests or scheduled queries.
+Displaying it triggers no additional Nissan requests.
 
-The hardened endpoint validates the Linux process UID, a trusted temporary
-parent, a real 0700 directory and a regular 0600 state file owned by that UID.
-It rejects symlinks, multiply linked files and unsafe existing permissions.
-Exclusive creation and descriptor/path identity checks happen before state is
-read or written. Reopening does not truncate an unverified file; permissions
-are never silently repaired and rejected paths are not removed. Competing
-first-time creation can return unavailable safely; no Nissan query is started.
-The boundary excludes a hostile root process or another process with the same
-UID. A missing POSIX extension uses the bounded Linux `/proc/self/status` UID
-record; there is no new package dependency. Windows ACLs are not inferred from
-Unix-style stat values, and production endpoint use is limited to Linux.
+Changing input clears the result. An in-flight result from the previous input
+is discarded, while any resulting cooldown remains associated with its account.
 
-The worker has a 60-second request-start budget and per-socket limits. The PHP
-parent terminates a still-running worker after 70 seconds; the browser abandons
-its request after 75 seconds. Closing the page does not guarantee cancellation
-of an already running server query. Process termination on target Linux remains
-part of the pending device validation.
+The settings build delivers both PHP files from `public/modules/vehicles/nissanconnect/`.
+The endpoint URL is `/openWB/web/settings/modules/vehicles/nissanconnect/test_connection.php`;
+it invokes Core's `packages/modules/vehicles/nissanconnect/connection_test.py`.
+Production requires Linux, PHP 7.4+ with `proc_open` and Python 3.9+ at
+`/usr/bin/python3`. UI-only installation cannot supply the Python worker.
 
-## Offline evidence and remaining work
+The endpoint accepts same-origin JSON POST and inherits web-server access control.
+Origin checks are not authentication; reverse proxies must preserve the actual
+scheme/host relationship. Credentials go through POST and worker stdin, never
+command arguments. Responses use `no-store`, stderr is discarded and errors use
+fixed codes. Run actual account tests privately; the agent-environment guard is
+only a precaution. See [privacy](privacy.md) for storage and transport boundaries.
 
-Before the 2026-10-02 private-state hardening, the exact Core target
-`3ced7f9ce` passed 122 synthetic module/PHP tests under
-Python 3.9.2 on Windows. The preceding 11 native-interface checks remain valid;
-the adapter and shared interfaces were not changed in this extension. PHP helper
-checks ran with PHP 7.4.33 and cover origin/input checks, subprocess limits,
-stderr exclusion, cooldown persistence and concurrent lock exclusion.
+Only one settings test runs at a time. Complete battery success, including zero
+SoC, starts a five-minute account cooldown at completion. Account changes are
+allowed; returning to an account retains its pause, even with changed password
+or VIN. Ordinary failure or a busy response adds no account cooldown. Provider
+advice is independent and applies across accounts when its scope is unknown:
+429 without usable advice defaults to five minutes; valid 429/503 advice is
+capped at 24 hours; 503 without usable advice adds no manual-test pause.
 
-The module suite now includes a complete loopback HTTP contract test with 25
-checks. Two owned PHP servers share isolated temporary state. The endpoint and
-helper are copied from the module; only the fixed Python interpreter path is
-adapted for the host, and a synthetic worker replaces the real Nissan client.
-Checks cover response codes/headers, rejection before worker startup, corrected
-login, zero SoC, account and provider cooldowns, concurrent requests through two
-servers, invalid worker output, private state and expired fixture state. This
-tests actual HTTP/PHP/process boundaries without a Nissan or wallbox connection.
+The server stores account cooldown digests and expiry times in private temporary
+state. It remains authoritative after a reload or across browser tabs. This
+manual-test state is separate from scheduled-client authentication and backoff.
+The PHP parent terminates a still-running worker after 70 seconds; the browser
+times out after 75 seconds. Closing the page does not guarantee cancellation of
+a server query already running. These limits are covered by synthetic tests;
+they do not prove every target host's process behavior.
 
-Sixteen UI tests passed on development and the pinned 2.2.3 source. Additional
-cases cover network failure, invalid JSON, an incomplete success response and
-the actual 75-second browser deadline using a controlled clock. A browser timeout
-now reports an explicit timeout message and releases the test button. Exceptions
-and raw response details are not shown. Flake8, ESLint and the pinned build passed.
-The isolated browser preview offers selectable synthetic success/error scenarios,
-including provider delay and a real 75-second wait; its reset clears only demo
-state. No real account or wallbox was used.
+## Color-theme refresh indicator
 
-The owner subsequently reported an Apache/PHP/Python runtime check, candidate
-installation, an unsaved settings connection test, a regular module query and
-unsaved-test removal on the wallbox. The displayed battery data matched the
-official app. Overnight logs and GUI changes are also reported; precise
-automatic cadence, charging with this SoC module, sustained token renewal and
-saved-settings removal still need their own acceptance evidence.
-
-The private-state hardening and its additional tests are local source changes
-after the frozen pre-Bulletproof candidate and have not been deployed. On
-2026-10-02, the existing portable Windows PHP 7.4.33 interpreter was located
-outside PATH; no download or installation was necessary. Both PHP files pass
-syntax checks. The full affected module suite passes 142 tests (102 Python and
-40 portable PHP cases), with 12 Linux-only cases skipped. Actual Linux
-ownership/mode behavior and the complete hardened HTTP contract remain
-unverified, so BP-SEC-01 stays open. Windows metadata-predicate checks alone
-cannot establish Unix filesystem behavior. No production service was accessed.
-
-This is not a full Core regression or completed security/privacy review.
-Any wallbox change still requires an explicit warning and the owner's express
-approval. License/API terms and privacy checks remain open under the
-Bulletproof plan; the project remains open.
-
-## Color-theme refresh indicator in the pinned 2.2.3 Core
-
-Read-only source analysis at `3ced7f9cef3c70980ee1fab670f0d0717d1809ca`:
-`VehicleData.vue::loadSoc` and `CompactListItem.vue::loadSoc` set the local
-`waitingForSoc` flag after sending `force_soc_update`. The Colors message
-handler clears it only on `openWB/chargepoint/<id>/get/connected_vehicle/soc`.
-The Core changed-values publisher emits that composite object only when its
-contents change. A successful cached Nissan query can leave all its fields
-unchanged, including the original measurement timestamp. The spinner then
-persists even though the request has finished. Receiving the vehicle's own
-`get/soc` message does not clear that chargepoint flag. A rejected older
-measurement can produce the same lack of a changed composite message.
-
-The reset is therefore not strictly tied to a changed SoC percentage: a changed
-measurement timestamp, range, fault state or other composite field also causes
-a publication. The code has no timeout for `waitingForSoc`. Reloading the theme
-reinitializes its local flag; this does not refresh vehicle measurements.
-No real private request trace was inspected to prove which path occurred in
-one particular click. This is an identified theme behavior, not evidence of a
-still-running Nissan HTTP request. The module must not invent measurement times
-or publish unrelated chargepoint data to work around it. A separate theme issue
-can request completion/error handling and a bounded wait indicator. No theme or
-shared Core change is included in the odometer implementation.
+In the inspected 2.2.3 Color theme, the pending indicator clears only when the
+connected-vehicle SoC object is republished with changed contents. Cached data
+or a rejected older measurement can leave it pending after the query finishes.
+A change in percentage, time, range or fault data can trigger that publication;
+the percentage alone is not decisive. The theme has no timeout for this flag.
+Reloading resets the local indicator, not vehicle measurements. This separate
+theme behavior is not worked around by inventing times or publishing chargepoint
+state from the Nissan module.

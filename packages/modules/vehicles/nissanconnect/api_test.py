@@ -3,11 +3,12 @@ import base64
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
 from http.client import RemoteDisconnected
+from importlib import import_module
 import logging
 import re
 from socket import gaierror
 import traceback
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
@@ -26,6 +27,8 @@ OTHER_VIN = "SJNFAAZE1U0000002"
 MEASUREMENT_UNIX_SECONDS = 1640995200.0
 BATTERY_URL = api.CARS_BASE_URL + "v1/cars/" + VIN + "/battery-status"
 COCKPIT_URL = api.CARS_BASE_URL + "v1/cars/" + VIN + "/cockpit"
+ACTIVE_REFRESH_URL = api.CARS_BASE_URL + "v1/cars/" + VIN + "/actions/refresh-battery-status"
+ACTION_STATUS_URL = api.CARS_BASE_URL + "v1/cars/" + VIN + "/actions/status?actionId=synthetic-action"
 REFRESH_URL = api.BFF_BASE_URL + "v1/oauth2/refresh-token?platform=Android"
 FORM = ('<form action="/commonauth"><input name="sessionDataKey" value="synthetic-session">'
         '<input name="regionCode" value="EU"><input name="password" type="password"></form>')
@@ -342,6 +345,11 @@ def test_native_configuration_roundtrip_and_private_repr():
     from dataclass_utils import asdict, dataclass_from_dict
 
     config = NissanConnect(configuration=NissanConnectConfiguration("synthetic@example.invalid", "synthetic-password"))
+    assert config.configuration.refresh_while_charging is False
+    legacy = asdict(config)
+    del legacy["configuration"]["refresh_while_charging"]
+    assert dataclass_from_dict(NissanConnect, legacy).configuration.refresh_while_charging is False
+    config.configuration.refresh_while_charging = True
     decoded = dataclass_from_dict(NissanConnect, asdict(config))
     assert decoded == config
     assert "synthetic" not in repr(config)
@@ -350,6 +358,7 @@ def test_native_configuration_roundtrip_and_private_repr():
 
 @pytest.mark.parametrize("path", [
     "/car-adapter/v1/cars/" + VIN + "/battery-status",
+    "/car-adapter/v1/cars/" + VIN + "/actions/status?actionId=synthetic-action",
     "/bff-web/v5/users/synthetic-user/cars",
     "/commonauth?code=synthetic-code&sessionDataKey=synthetic-session",
 ])
@@ -386,3 +395,140 @@ def test_transport_logs_hide_private_urls_without_muting_other_requests(monkeypa
     assert "Other vehicle request remains visible" in caplog.text
     assert "Nissan diagnostic remains visible" in caplog.text
     assert "Subsequent request remains visible" in caplog.text
+
+
+@pytest.fixture
+def active_refresh(http, monkeypatch):
+    clock = Mock(return_value=0.0)
+    sleep = Mock()
+    monkeypatch.setattr(api.time, "monotonic", clock)
+    monkeypatch.setattr(api.time, "sleep", sleep)
+    instance = client()
+    instance._expires_at_monotonic_seconds = float("inf")
+    http.post(ACTIVE_REFRESH_URL, json={"data": {"id": "synthetic-action"}})
+    http.get(ACTION_STATUS_URL, json={"data": {"attributes": {"status": "completed"}}})
+    http.get(BATTERY_URL, json=battery(batteryBarLevel=114))
+    http.get(COCKPIT_URL, json={"data": {"attributes": {"totalMileage": 0}}})
+    return instance, clock, sleep
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_adapter_refresh_requires_charging_and_keeps_hourly_limit_across_pauses(active_refresh, http, enabled):
+    from modules.common.abstract_vehicle import VehicleUpdateData
+    from modules.vehicles import nissanconnect
+
+    instance, clock, _ = active_refresh
+    factory = Mock()
+    # Isolate the adapter from Core's MQTT startup; exercise its real updater and client.
+    with patch.dict("sys.modules", {"modules.common.configurable_vehicle": Mock(ConfigurableVehicle=factory)}), \
+            patch.object(nissanconnect, "soc", create=True):
+        soc = import_module("modules.vehicles.nissanconnect.soc")
+        with patch.object(soc, "NissanClient", return_value=instance), \
+                patch.object(soc, "ConfigurableVehicle", factory):
+            config = NissanConnect(configuration=NissanConnectConfiguration(refresh_while_charging=enabled))
+            soc.create_vehicle(config, 0)
+            updater = factory.call_args.kwargs["component_updater"]
+            for elapsed_seconds, charging, expected_commands in [
+                    (0, False, 0), (0, True, 1), (120, False, 1), (600, True, 1),
+                    (3599, True, 1), (3600, False, 1), (3600, True, 2)]:
+                clock.return_value = elapsed_seconds
+                state = updater(VehicleUpdateData(plug_state=True, charge_state=charging))
+                assert state.soc == 47.5 and state.soc_timestamp == MEASUREMENT_UNIX_SECONDS
+                assert sum(r.url == ACTIVE_REFRESH_URL for r in http.request_history) == (
+                    expected_commands if enabled else 0)
+
+
+def test_active_refresh_waits_for_completion_then_reads_original_measurement(active_refresh, http, caplog):
+    instance, _, sleep = active_refresh
+    caplog.set_level(logging.DEBUG, logger=api.__name__)
+    http.get(ACTION_STATUS_URL, [{"json": {"data": {"attributes": {"status": status}}}}
+                                 for status in ("pending", "completed")])
+    assert instance.fetch_battery(refresh_from_vehicle=True) == (47.5, None, MEASUREMENT_UNIX_SECONDS, 0)
+    assert [r.url for r in http.request_history] == [
+        ACTIVE_REFRESH_URL, ACTION_STATUS_URL, ACTION_STATUS_URL, BATTERY_URL, COCKPIT_URL]
+    command = http.request_history[0]
+    assert command.method == "POST" and command.json() == {"data": {"type": "RefreshBatteryStatus"}}
+    assert command.headers["Authorization"] == "Bearer synthetic-access"
+    assert command.headers["Content-Type"] == api.JSON_API_CONTENT_TYPE
+    sleep.assert_called_once_with(api.BATTERY_REFRESH_POLL_INTERVAL_SECONDS)
+    assert "Nissan battery refresh completed." in caplog.text
+    assert all(value not in caplog.text for value in (VIN, "synthetic-action", "synthetic-access"))
+
+
+@pytest.mark.parametrize("url,response", [
+    (ACTIVE_REFRESH_URL, {"exc": requests.ConnectionError("synthetic-private-url")}),
+    (ACTIVE_REFRESH_URL, {"exc": requests.Timeout("synthetic-private-url")}),
+    (ACTIVE_REFRESH_URL, {"status_code": 401}),
+    (ACTIVE_REFRESH_URL, {"status_code": 429}),
+    (ACTIVE_REFRESH_URL, {"status_code": 503}),
+    (ACTIVE_REFRESH_URL, {"text": "synthetic-private-body"}),
+    (ACTIVE_REFRESH_URL, {"json": {"data": {"id": None}}}),
+    (ACTIVE_REFRESH_URL, {"json": {"data": {"id": ""}}}),
+    (ACTIVE_REFRESH_URL, {"json": {"data": []}}),
+    (ACTION_STATUS_URL, {"exc": requests.exceptions.SSLError("synthetic-private-url")}),
+    (ACTION_STATUS_URL, {"exc": requests.RequestException("synthetic-private-url")}),
+    (ACTION_STATUS_URL, {"status_code": 429}),
+    (ACTION_STATUS_URL, {"status_code": 503}),
+    (ACTION_STATUS_URL, {"text": "synthetic-private-body"}),
+    (ACTION_STATUS_URL, {"json": {"data": {"attributes": {"status": None}}}}),
+    (ACTION_STATUS_URL, {"json": {}}),
+])
+def test_failed_refresh_preserves_passive_reads_and_hourly_limit(active_refresh, http, caplog, url, response):
+    instance, clock, _ = active_refresh
+    caplog.set_level(logging.DEBUG, logger=api.__name__)
+    http.register_uri("POST" if url == ACTIVE_REFRESH_URL else "GET", url, **response)
+    for elapsed_seconds in (0, 600, 3599, 3600):
+        clock.return_value = elapsed_seconds
+        assert instance.fetch_battery(refresh_from_vehicle=True) == (47.5, None, MEASUREMENT_UNIX_SECONDS, 0)
+        assert sum(r.url == ACTIVE_REFRESH_URL for r in http.request_history) == (2 if elapsed_seconds == 3600 else 1)
+    if url == ACTION_STATUS_URL:
+        assert sum(r.url == ACTION_STATUS_URL for r in http.request_history) == 2  # One poll per hourly attempt.
+    assert "Nissan battery refresh failed; reading cached data." in caplog.text
+    assert all(value not in caplog.text for value in (VIN, "synthetic-action", "synthetic-private"))
+
+
+@pytest.mark.parametrize("status", ["pending", "unknown", "failed", "cancelled"])
+def test_refresh_polling_is_bounded_and_terminal_failure_stops_early(active_refresh, http, status):
+    instance, _, sleep = active_refresh
+    poll = http.get(ACTION_STATUS_URL, json={"data": {"attributes": {"status": status}}})
+    assert instance.fetch_battery(refresh_from_vehicle=True)[0] == 47.5
+    expected_polls = 1 if status in ("failed", "cancelled") else api.MAX_BATTERY_REFRESH_POLLS
+    assert poll.call_count == expected_polls
+    assert sleep.call_count == expected_polls - 1
+
+
+def test_status_authentication_retry_never_replays_refresh_command(active_refresh, http):
+    instance, _, _ = active_refresh
+    poll = http.get(ACTION_STATUS_URL, [{"status_code": 401},
+                                        {"json": {"data": {"attributes": {"status": "completed"}}}}])
+    token = http.post(REFRESH_URL, json={"access_token": "synthetic-new"})
+    assert instance.fetch_battery(refresh_from_vehicle=True)[0] == 47.5
+    assert poll.call_count == 2 and token.call_count == 1
+    assert sum(r.url == ACTIVE_REFRESH_URL for r in http.request_history) == 1
+
+
+@pytest.mark.parametrize("exception_type,requests_per_failed_poll", [
+    (requests.ConnectionError, 2), (requests.ConnectTimeout, 1), (requests.ReadTimeout, 1),
+])
+@pytest.mark.parametrize("recovers", [True, False])
+def test_status_transport_failures_consume_bounded_polls_without_replaying_command(
+        active_refresh, http, caplog, exception_type, requests_per_failed_poll, recovers):
+    instance, clock, sleep = active_refresh
+    caplog.set_level(logging.DEBUG, logger=api.__name__)
+    responses = [{"exc": exception_type("synthetic-private-url")}] * requests_per_failed_poll
+    if recovers:
+        responses.append({"json": {"data": {"attributes": {"status": "completed"}}}})
+    poll = http.get(ACTION_STATUS_URL, responses)
+    assert instance.fetch_battery(refresh_from_vehicle=True) == (47.5, None, MEASUREMENT_UNIX_SECONDS, 0)
+    expected_requests = requests_per_failed_poll + 1 if recovers else (
+        requests_per_failed_poll * api.MAX_BATTERY_REFRESH_POLLS)
+    assert poll.call_count == expected_requests
+    assert sleep.call_count == (1 if recovers else api.MAX_BATTERY_REFRESH_POLLS - 1)
+    assert all(call.args == (api.BATTERY_REFRESH_POLL_INTERVAL_SECONDS,) for call in sleep.call_args_list)
+    assert ("Nissan battery refresh completed." in caplog.text) is recovers
+    assert "Nissan battery refresh status transport error." in caplog.text
+    assert all(value not in caplog.text for value in (VIN, "synthetic-action", "synthetic-private"))
+    clock.return_value = 600
+    assert instance.fetch_battery(refresh_from_vehicle=True)[0] == 47.5
+    assert poll.call_count == expected_requests
+    assert sum(r.url == ACTIVE_REFRESH_URL for r in http.request_history) == 1

@@ -18,7 +18,9 @@ def create_vehicle(vehicle_config: NissanConnect, vehicle: int):
         if client is None or current != configuration_key:
             client = NissanClient(*current)
             configuration_key = current
-        soc_percent, range_km, measurement_unix_seconds, odometer_km = client.fetch_battery()
+        # Core supplies the charging state on each scheduled/manual query, not every charging edge.
+        soc_percent, range_km, measurement_unix_seconds, odometer_km = client.fetch_battery(
+            refresh_from_vehicle=config.refresh_while_charging and vehicle_update_data.charge_state)
         return CarState(soc=soc_percent, range=range_km, soc_timestamp=measurement_unix_seconds, odometer=odometer_km)
 
     return ConfigurableVehicle(vehicle_config=vehicle_config, component_updater=updater,

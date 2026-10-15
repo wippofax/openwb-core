@@ -412,12 +412,11 @@ def active_refresh(http, monkeypatch):
     return instance, clock, sleep
 
 
-@pytest.mark.parametrize("enabled", [False, True])
-def test_adapter_refresh_requires_charging_and_keeps_hourly_limit_across_pauses(active_refresh, http, enabled):
-    from modules.common.abstract_vehicle import VehicleUpdateData
+@pytest.fixture
+def adapter_updater(active_refresh):
     from modules.vehicles import nissanconnect
 
-    instance, clock, _ = active_refresh
+    instance, _, _ = active_refresh
     factory = Mock()
     # Isolate the adapter from Core's MQTT startup; exercise its real updater and client.
     with patch.dict("sys.modules", {"modules.common.configurable_vehicle": Mock(ConfigurableVehicle=factory)}), \
@@ -425,17 +424,50 @@ def test_adapter_refresh_requires_charging_and_keeps_hourly_limit_across_pauses(
         soc = import_module("modules.vehicles.nissanconnect.soc")
         with patch.object(soc, "NissanClient", return_value=instance), \
                 patch.object(soc, "ConfigurableVehicle", factory):
-            config = NissanConnect(configuration=NissanConnectConfiguration(refresh_while_charging=enabled))
+            config = NissanConnect(configuration=NissanConnectConfiguration())
             soc.create_vehicle(config, 0)
-            updater = factory.call_args.kwargs["component_updater"]
-            for elapsed_seconds, charging, expected_commands in [
-                    (0, False, 0), (0, True, 1), (120, False, 1), (600, True, 1),
-                    (3599, True, 1), (3600, False, 1), (3600, True, 2)]:
-                clock.return_value = elapsed_seconds
-                state = updater(VehicleUpdateData(plug_state=True, charge_state=charging))
-                assert state.soc == 47.5 and state.soc_timestamp == MEASUREMENT_UNIX_SECONDS
-                assert sum(r.url == ACTIVE_REFRESH_URL for r in http.request_history) == (
-                    expected_commands if enabled else 0)
+            yield factory.call_args.kwargs["component_updater"], config.configuration
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize("initially_plugged", [False, True])
+@pytest.mark.parametrize("command_fails", [False, True])
+def test_adapter_plug_in_refresh_and_hourly_charging_limit(
+        active_refresh, adapter_updater, http, enabled, initially_plugged, command_fails):
+    from modules.common.abstract_vehicle import VehicleUpdateData
+
+    _, clock, _ = active_refresh
+    updater, config = adapter_updater
+    config.refresh_while_charging = enabled
+    if command_fails:
+        http.post(ACTIVE_REFRESH_URL, exc=requests.Timeout("synthetic-private-url"))
+    for elapsed_seconds, plugged, charging, expected_commands in [
+            (0, initially_plugged, False, int(initially_plugged)),
+            (10, True, False, 1), (20, True, False, 1), (30, True, True, 1),
+            (60, True, False, 1), (70, True, True, 1),  # PV pauses do not create plug-ins.
+            (100, False, False, 1), (110, True, False, 2),  # A short drive bypasses the hour.
+            (3709, True, True, 2), (3710, True, False, 2), (3710, True, True, 3),
+            (3720, False, False, 3), (3730, True, False, 4)]:
+        clock.return_value = elapsed_seconds
+        state = updater(VehicleUpdateData(plug_state=plugged, charge_state=charging))
+        assert state.soc == 47.5 and state.soc_timestamp == MEASUREMENT_UNIX_SECONDS
+        assert sum(r.url == ACTIVE_REFRESH_URL for r in http.request_history) == (
+            expected_commands if enabled else 0)
+
+
+def test_failed_battery_read_does_not_replay_plug_in_command(active_refresh, adapter_updater, http):
+    from modules.common.abstract_vehicle import VehicleUpdateData
+
+    _, clock, _ = active_refresh
+    updater, config = adapter_updater
+    config.refresh_while_charging = True
+    http.get(BATTERY_URL, [{"exc": requests.Timeout("synthetic-private-url")},
+                           {"json": battery(batteryBarLevel=114)}])
+    with pytest.raises(api.NissanError):
+        updater(VehicleUpdateData(plug_state=True))
+    clock.return_value = 10
+    assert updater(VehicleUpdateData(plug_state=True)).soc == 47.5
+    assert sum(r.url == ACTIVE_REFRESH_URL for r in http.request_history) == 1
 
 
 def test_active_refresh_waits_for_completion_then_reads_original_measurement(active_refresh, http, caplog):

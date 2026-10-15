@@ -357,14 +357,14 @@ class NissanClient:
         else:
             raise NissanError("Could not select a unique vehicle. Please configure the VIN.")
 
-    def _refresh_battery(self, vehicle_url):
-        """Attempt a vehicle refresh at most hourly, including failures, for this client lifetime.
+    def _refresh_battery(self, vehicle_url, newly_plugged=False):
+        """Refresh hourly, including failures, or once per newly observed plug-in.
 
         Poll a bounded number of times with pauses. A completed action does not
         prove a new measurement; fetch_battery still returns Nissan's actual timestamp.
         """
         now_monotonic_seconds = time.monotonic()
-        if (self._last_battery_refresh_monotonic_seconds is not None
+        if (not newly_plugged and self._last_battery_refresh_monotonic_seconds is not None
                 and now_monotonic_seconds - self._last_battery_refresh_monotonic_seconds
                 < BATTERY_REFRESH_INTERVAL_SECONDS):
             return
@@ -403,20 +403,22 @@ class NissanClient:
             # Do not discard readable cloud data or expose action IDs and response bodies.
             log.debug("Nissan battery refresh failed; reading cached data.")
 
-    def fetch_battery(self, refresh_from_vehicle=False) -> Tuple[float, Optional[float], float, Optional[float]]:
+    def fetch_battery(self, refresh_from_vehicle=False,
+                      newly_plugged=False) -> Tuple[float, Optional[float], float, Optional[float]]:
         """Return SoC (%), range (km), battery measurement time (Unix seconds), odometer (km).
 
         Range and odometer may be None; valid zero values are preserved. The timestamp
         belongs only to the battery data, not the separately retrieved odometer.
         Battery or required login failures raise NissanError. Odometer failures do not
         invalidate a valid SoC and return None for mileage. Active refresh is opt-in
-        and rate-limited; its failure leaves normal cloud reads available.
+        and rate-limited; a newly observed plug-in bypasses the hourly limit only when
+        refresh_from_vehicle is enabled. Failures leave normal cloud reads available.
         """
         if not self._vin:
             self._select_vehicle()
         url = CARS_BASE_URL + "v1/cars/" + self._vin
         if refresh_from_vehicle:
-            self._refresh_battery(url)
+            self._refresh_battery(url, newly_plugged=newly_plugged)
         soc_percent, range_km, measurement_unix_seconds = parse_battery(self._get(url + "/battery-status"))
         # Cockpit availability differs by vehicle. Never discard a valid SoC or invent mileage.
         odometer_km = None

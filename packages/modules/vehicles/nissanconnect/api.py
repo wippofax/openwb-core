@@ -37,7 +37,7 @@ import time
 from typing import Optional, Tuple
 from urllib.parse import parse_qs, quote, urlencode, urljoin, urlsplit
 
-from requests import ConnectionError, RequestException, Timeout
+from requests import ConnectionError, ConnectTimeout, ReadTimeout, RequestException, Timeout
 from requests.exceptions import SSLError
 from modules.common.req import get_http_session
 
@@ -72,6 +72,9 @@ CONNECTION_ERROR_MESSAGES = (
     ((ConnectionResetError, ConnectionAbortedError, BrokenPipeError), "Nissan connection was interrupted."),
 )
 _PRIVATE_HTTP_REQUEST = ContextVar("nissan_private_http_request", default=False)
+# Temporary diagnostics: remove after the intermittent active-refresh failure is resolved.
+_REFRESH_DIAGNOSTIC_PHASE = ContextVar("nissan_refresh_diagnostic_phase", default=None)
+REFRESH_DIAGNOSTIC_STATUSES = ("pending", "running", "completed", "failed", "cancelled")
 
 
 def _allow_transport_log(record):
@@ -115,6 +118,20 @@ def _connection_error_message(error):
             chained = cause.__context__
         pending.extend((*cause.args, getattr(cause, "reason", None), chained))
     return "Nissan connection failed."
+
+
+def _refresh_error_category(error):
+    """Return only fixed categories; never serialize an exception or its attached response."""
+    for error_type, category in ((ConnectTimeout, "connect_timeout"), (ReadTimeout, "read_timeout"),
+                                 (Timeout, "timeout"), (SSLError, "tls"),
+                                 (AuthenticationError, "authentication"), (NissanTransportError, "transport"),
+                                 (KeyError, "missing_field"), (TypeError, "invalid_shape"),
+                                 (ValueError, "invalid_value")):
+        if isinstance(error, error_type):
+            return category
+    if isinstance(error, ConnectionError):
+        return _connection_error_message(error)
+    return "nissan_error" if isinstance(error, NissanError) else "request_error"
 
 
 class _LoginForm(HTMLParser):
@@ -206,11 +223,16 @@ class NissanClient:
 
     def _request(self, method, url, auth_request=False, **kwargs):
         log_context = _PRIVATE_HTTP_REQUEST.set(True)
+        phase = _REFRESH_DIAGNOSTIC_PHASE.get()
+        started_seconds = time.perf_counter() if phase else 0
+        outcome, http_status, attempts = "unexpected_error", None, 0
         try:
             for retry_count in range(MAX_VEHICLE_CONNECTION_RETRIES + 1):
                 try:
+                    attempts += 1
                     response = self._session.request(method, url, timeout=REQUEST_TIMEOUT_SECONDS,
                                                      allow_redirects=False, **kwargs)
+                    outcome, http_status = "response", response.status_code
                     break
                 except ConnectionError as error:
                     if (retry_count == MAX_VEHICLE_CONNECTION_RETRIES or isinstance(error, (Timeout, SSLError))
@@ -219,16 +241,27 @@ class NissanClient:
                     # Discard pooled connections, retaining cookies, tokens and privacy settings.
                     self._session.close()
                     log.debug("Nissan vehicle connection failed; retrying once.")
-        except Timeout:
+        except Timeout as error:
+            outcome = _refresh_error_category(error)
             raise NissanTransportError("Nissan request timed out.") from None
-        except SSLError:
+        except SSLError as error:
+            outcome = _refresh_error_category(error)
             raise NissanError("Nissan TLS connection failed.") from None
         except ConnectionError as error:
+            outcome = _refresh_error_category(error)
             raise NissanTransportError(_connection_error_message(error)) from None
-        except RequestException:
+        except RequestException as error:
+            outcome = _refresh_error_category(error)
             raise NissanError("Nissan could not be reached.") from None
         finally:
             _PRIVATE_HTTP_REQUEST.reset(log_context)
+            if phase:
+                target = ("vehicle" if url.startswith(CARS_BASE_URL) else
+                          "identity" if url.startswith(AUTH_BASE_URL) else "token")
+                log.debug("Nissan refresh HTTP phase=%s target=%s method=%s attempts=%d "
+                          "outcome=%s http_status=%s elapsed_seconds=%.3f",
+                          phase, target, method, attempts, outcome, http_status,
+                          time.perf_counter() - started_seconds)
         if response.status_code in (HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN) or (
                 auth_request and response.status_code == HTTPStatus.BAD_REQUEST):
             raise AuthenticationError("Nissan rejected the login or access authorization.")
@@ -238,12 +271,19 @@ class NissanClient:
 
     def _json(self, method, url, **kwargs):
         response = self._request(method, url, **kwargs)
+        reason = "invalid_json"
         try:
             body = response.json()
-            if not isinstance(body, dict) or body.get("error") or body.get("errors"):
+            reason = "invalid_shape"
+            if not isinstance(body, dict):
+                raise ValueError
+            reason = "api_error_response"
+            if body.get("error") or body.get("errors"):
                 raise ValueError
             return body
         except ValueError:
+            if _REFRESH_DIAGNOSTIC_PHASE.get():
+                log.debug("Nissan refresh response phase=%s reason=%s", _REFRESH_DIAGNOSTIC_PHASE.get(), reason)
             raise NissanError("Nissan returned an invalid response.") from None
 
     def _redirects(self, response, url, callback=False):
@@ -367,10 +407,16 @@ class NissanClient:
         if (not newly_plugged and self._last_battery_refresh_monotonic_seconds is not None
                 and now_monotonic_seconds - self._last_battery_refresh_monotonic_seconds
                 < BATTERY_REFRESH_INTERVAL_SECONDS):
+            log.debug("Nissan refresh skipped: cooldown remaining_seconds=%.0f",
+                      BATTERY_REFRESH_INTERVAL_SECONDS -
+                      (now_monotonic_seconds - self._last_battery_refresh_monotonic_seconds))
             return
         self._last_battery_refresh_monotonic_seconds = now_monotonic_seconds
+        diagnostic_context = _REFRESH_DIAGNOSTIC_PHASE.set("authentication")
+        started_seconds, poll_number = time.perf_counter(), 0
         try:
             self._authenticate()
+            _REFRESH_DIAGNOSTIC_PHASE.set("command")
             # Count from command submission if authentication took time. Never replay this POST.
             self._last_battery_refresh_monotonic_seconds = time.monotonic()
             log.debug("Requesting Nissan battery refresh.")
@@ -378,6 +424,7 @@ class NissanClient:
                               headers={"Authorization": "Bearer " + self._access_token,
                                        "Content-Type": JSON_API_CONTENT_TYPE},
                               json={"data": {"type": "RefreshBatteryStatus"}})
+            _REFRESH_DIAGNOSTIC_PHASE.set("command_response")
             action_id = body["data"]["id"]
             if not isinstance(action_id, str) or not action_id:
                 raise ValueError
@@ -385,23 +432,38 @@ class NissanClient:
             for poll_index in range(MAX_BATTERY_REFRESH_POLLS):
                 if poll_index:
                     time.sleep(BATTERY_REFRESH_POLL_INTERVAL_SECONDS)
+                poll_number = poll_index + 1
+                _REFRESH_DIAGNOSTIC_PHASE.set("status")
+                log.debug("Nissan refresh polling poll=%d/%d", poll_number, MAX_BATTERY_REFRESH_POLLS)
                 try:
-                    status = self._get(status_url)["data"]["attributes"]["status"]
+                    body = self._get(status_url)
+                    _REFRESH_DIAGNOSTIC_PHASE.set("status_response")
+                    status = body["data"]["attributes"]["status"]
                 except NissanTransportError:
                     # A failed status read consumes this poll, not another vehicle command.
                     log.debug("Nissan battery refresh status transport error.")
                     continue
                 if not isinstance(status, str):
                     raise ValueError
+                # Only documented fixed states are logged; arbitrary server text stays private.
+                log.debug("Nissan refresh poll=%d status=%s", poll_number,
+                          status.lower() if status.lower() in REFRESH_DIAGNOSTIC_STATUSES else "other")
                 if status.lower() == "completed":
                     log.debug("Nissan battery refresh completed.")
                     return
                 if status.lower() in ("cancelled", "failed"):
                     break
             log.debug("Nissan battery refresh did not complete; reading cached data.")
-        except (NissanError, KeyError, TypeError, ValueError):
+        except (NissanError, KeyError, TypeError, ValueError) as error:
             # Do not discard readable cloud data or expose action IDs and response bodies.
+            log.debug("Nissan refresh failure phase=%s poll=%d reason=%s",
+                      _REFRESH_DIAGNOSTIC_PHASE.get(), poll_number, _refresh_error_category(error))
             log.debug("Nissan battery refresh failed; reading cached data.")
+        finally:
+            phase = _REFRESH_DIAGNOSTIC_PHASE.get()
+            _REFRESH_DIAGNOSTIC_PHASE.reset(diagnostic_context)
+            log.debug("Nissan refresh finished phase=%s polls=%d elapsed_seconds=%.3f",
+                      phase, poll_number, time.perf_counter() - started_seconds)
 
     def fetch_battery(self, refresh_from_vehicle=False,
                       newly_plugged=False) -> Tuple[float, Optional[float], float, Optional[float]]:

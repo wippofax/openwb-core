@@ -564,3 +564,97 @@ def test_status_transport_failures_consume_bounded_polls_without_replaying_comma
     assert instance.fetch_battery(refresh_from_vehicle=True)[0] == 47.5
     assert poll.call_count == expected_requests
     assert sum(r.url == ACTIVE_REFRESH_URL for r in http.request_history) == 1
+
+
+# Temporary diagnostic coverage; remove with the diagnostic instrumentation after resolution.
+@pytest.mark.parametrize("response,expected", [
+    ({"exc": requests.ConnectTimeout("synthetic-private")}, "outcome=connect_timeout http_status=None"),
+    ({"exc": requests.ReadTimeout("synthetic-private")}, "outcome=read_timeout http_status=None"),
+    ({"exc": requests.Timeout("synthetic-private")}, "outcome=timeout http_status=None"),
+    ({"exc": requests.exceptions.SSLError("synthetic-private")}, "outcome=tls http_status=None"),
+    ({"exc": requests.ConnectionError(RemoteDisconnected("synthetic-private"))},
+     "outcome=Nissan connection closed without a response. http_status=None"),
+    ({"exc": requests.ConnectionError(ConnectionResetError("synthetic-private"))},
+     "outcome=Nissan connection was interrupted. http_status=None"),
+    ({"exc": requests.ConnectionError(gaierror("synthetic-private"))},
+     "outcome=Nissan name resolution failed. http_status=None"),
+    ({"exc": requests.ConnectionError(ConnectionRefusedError("synthetic-private"))},
+     "outcome=Nissan connection was refused. http_status=None"),
+    ({"exc": requests.RequestException("synthetic-private")}, "outcome=request_error http_status=None"),
+    ({"status_code": 401, "text": "synthetic-private"}, "outcome=response http_status=401"),
+    ({"status_code": 429, "text": "synthetic-private"}, "outcome=response http_status=429"),
+    ({"status_code": 503, "text": "synthetic-private"}, "outcome=response http_status=503"),
+    ({"text": "synthetic-private"}, "phase=command reason=invalid_json"),
+    ({"json": ["synthetic-private"]}, "phase=command reason=invalid_shape"),
+    ({"json": {"errors": [{"detail": "synthetic-private"}]}}, "phase=command reason=api_error_response"),
+    ({"json": {"error": "synthetic-private"}}, "phase=command reason=api_error_response"),
+    ({"json": {"private": "synthetic-private"}}, "phase=command_response poll=0 reason=missing_field"),
+    ({"json": {"data": []}}, "phase=command_response poll=0 reason=invalid_shape"),
+    ({"json": {"data": {"id": None}}}, "phase=command_response poll=0 reason=invalid_value"),
+])
+def test_temporary_refresh_diagnostics_classify_without_private_data(active_refresh, http, caplog, response, expected):
+    instance, _, _ = active_refresh
+    caplog.set_level(logging.DEBUG, logger=api.__name__)
+    command = http.post(ACTIVE_REFRESH_URL, **(response if "exc" in response else
+                                               dict(response, headers={"X-Private": "synthetic-private"})))
+    assert instance.fetch_battery(refresh_from_vehicle=True)[0] == 47.5
+    assert command.call_count == 1
+    assert expected in caplog.text
+    assert "phase=command target=vehicle method=POST attempts=1" in caplog.text
+    assert re.search(r"elapsed_seconds=\d+\.\d{3}", caplog.text)
+    assert api._REFRESH_DIAGNOSTIC_PHASE.get() is None
+    assert all(value not in caplog.text for value in (
+        VIN, "synthetic-action", "synthetic-private", "synthetic-access", "synthetic-password",
+        "synthetic@example.invalid", api.CARS_BASE_URL))
+    assert all(record.exc_info is None for record in caplog.records)
+
+
+@pytest.mark.parametrize("response,expected", [
+    ({"status_code": 503, "text": "synthetic-private"}, "phase=status target=vehicle method=GET"),
+    ({"json": {}}, "phase=status_response poll=1 reason=missing_field"),
+    ({"json": {"data": []}}, "phase=status_response poll=1 reason=invalid_shape"),
+    ({"json": {"data": {"attributes": {"status": None}}}}, "phase=status_response poll=1 reason=invalid_value"),
+    ({"json": {"data": {"attributes": {"status": "synthetic-private"}}}}, "status=other"),
+    ({"json": {"data": {"attributes": {"status": "failed"}}}}, "status=failed"),
+    ({"json": {"data": {"attributes": {"status": "cancelled"}}}}, "status=cancelled"),
+])
+def test_temporary_poll_diagnostics_sanitize_status_payloads(active_refresh, http, caplog, response, expected):
+    instance, _, _ = active_refresh
+    caplog.set_level(logging.DEBUG, logger=api.__name__)
+    http.get(ACTION_STATUS_URL, **response)
+    assert instance.fetch_battery(refresh_from_vehicle=True)[0] == 47.5
+    assert expected in caplog.text
+    assert all(value not in caplog.text for value in (VIN, "synthetic-private", "synthetic-action"))
+    assert sum(r.url == ACTIVE_REFRESH_URL for r in http.request_history) == 1
+    assert api._REFRESH_DIAGNOSTIC_PHASE.get() is None
+
+
+def test_temporary_diagnostics_distinguish_authentication_and_restore_context(active_refresh, http, caplog):
+    instance, _, _ = active_refresh
+    caplog.set_level(logging.DEBUG, logger=api.__name__)
+    instance._expires_at_monotonic_seconds = -1
+    http.post(REFRESH_URL, status_code=503, text="synthetic-private")
+    instance._refresh_battery(api.CARS_BASE_URL + "v1/cars/" + VIN)
+    assert "phase=authentication target=token method=POST attempts=1 outcome=response http_status=503" in caplog.text
+    assert all(r.url != ACTIVE_REFRESH_URL for r in http.request_history)
+    assert api._REFRESH_DIAGNOSTIC_PHASE.get() is None
+    assert all(value not in caplog.text for value in ("synthetic-private", "synthetic-refresh", "synthetic-access"))
+
+
+def test_temporary_diagnostics_do_not_follow_passive_calls_or_leak_status_reauthentication(
+        active_refresh, http, caplog):
+    instance, _, _ = active_refresh
+    caplog.set_level(logging.DEBUG, logger=api.__name__)
+    http.get(ACTION_STATUS_URL, [{"status_code": 401},
+                                 {"json": {"data": {"attributes": {"status": "completed"}}}}])
+    http.post(REFRESH_URL, json={"access_token": "synthetic-private-new-token"})
+    assert instance.fetch_battery(refresh_from_vehicle=True)[0] == 47.5
+    assert "phase=status target=token method=POST" in caplog.text
+    assert "phase=status target=vehicle method=GET attempts=1 outcome=response http_status=401" in caplog.text
+    assert "phase=status target=vehicle method=GET attempts=1 outcome=response http_status=200" in caplog.text
+    assert "synthetic-private" not in caplog.text
+    assert sum(r.url == ACTIVE_REFRESH_URL for r in http.request_history) == 1
+    assert api._REFRESH_DIAGNOSTIC_PHASE.get() is None
+    caplog.clear()
+    assert instance.fetch_battery()[0] == 47.5
+    assert "Nissan refresh" not in caplog.text

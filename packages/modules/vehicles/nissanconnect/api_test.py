@@ -470,6 +470,52 @@ def test_failed_battery_read_does_not_replay_plug_in_command(active_refresh, ada
     assert sum(r.url == ACTIVE_REFRESH_URL for r in http.request_history) == 1
 
 
+@pytest.mark.parametrize("expired_token", [False, True])
+@pytest.mark.parametrize("command_fails", [False, True])
+def test_refresh_uses_fresh_connection_without_replaying_command(
+        active_refresh, http, expired_token, command_fails):
+    instance, _, _ = active_refresh
+    session = instance._session
+    session.cookies.set("synthetic", "retained")
+    manager = session.get_adapter(ACTIVE_REFRESH_URL).poolmanager
+    previous_pool = manager.connection_from_url(ACTIVE_REFRESH_URL)
+    command_pools = []
+    expected_token = "synthetic-new" if expired_token else "synthetic-access"
+
+    def authenticate(request, context):
+        # Refresh authentication before clearing the connections used by the command.
+        assert manager.connection_from_url(ACTIVE_REFRESH_URL) is previous_pool
+        return {"access_token": expected_token}
+
+    def command(request, context):
+        pool = manager.connection_from_url(ACTIVE_REFRESH_URL)
+        assert pool is not previous_pool
+        command_pools.append(pool)
+        assert request.headers["Authorization"] == "Bearer " + expected_token
+        if command_fails:
+            raise requests.ConnectionError(ConnectionResetError("synthetic-private"))
+        return {"data": {"id": "synthetic-action"}}
+
+    token_request = http.post(REFRESH_URL, json=authenticate)
+    command_request = http.post(ACTIVE_REFRESH_URL, json=command)
+    with patch.object(session, "close", wraps=session.close) as close:
+        # Passive reads preserve the pool; the next eligible command replaces it once.
+        assert instance.fetch_battery()[0] == 47.5
+        close.assert_not_called()
+        if expired_token:
+            instance._expires_at_monotonic_seconds = 0
+        for _ in range(2):
+            assert instance.fetch_battery(refresh_from_vehicle=True)[0] == 47.5
+        close.assert_called_once_with()
+    assert token_request.call_count == int(expired_token)
+    assert command_request.call_count == 1 and len(command_pools) == 1
+    assert manager.connection_from_url(ACTIVE_REFRESH_URL) is command_pools[0]
+    assert instance._session is session and session.cookies.get("synthetic") == "retained"
+    assert instance._access_token == expected_token and instance._refresh_token == "synthetic-refresh"
+    assert session.hooks["response"] == [] and not session.trust_env
+    assert not api._PRIVATE_HTTP_REQUEST.get() and api._REFRESH_DIAGNOSTIC_PHASE.get() is None
+
+
 def test_active_refresh_waits_for_completion_then_reads_original_measurement(active_refresh, http, caplog):
     instance, _, sleep = active_refresh
     caplog.set_level(logging.DEBUG, logger=api.__name__)

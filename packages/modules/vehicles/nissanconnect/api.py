@@ -419,6 +419,8 @@ class NissanClient:
             _REFRESH_DIAGNOSTIC_PHASE.set("command")
             # Count from command submission if authentication took time. Never replay this POST.
             self._last_battery_refresh_monotonic_seconds = time.monotonic()
+            # Avoid reusing an idle connection for this non-replayed command; retain session credentials.
+            self._session.close()
             log.debug("Requesting Nissan battery refresh.")
             body = self._json("POST", vehicle_url + "/actions/refresh-battery-status",
                               headers={"Authorization": "Bearer " + self._access_token,
